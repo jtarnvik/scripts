@@ -80,7 +80,7 @@ dump_database() {
     >"$output_dir/$db.sql" 2>"$stderr_tmp"
   local exit_code=$?
 
-  grep -v "Warning: Using a password on the command line interface can be insecure" "$stderr_tmp"
+  grep -v "\[Warning\] Using a password on the command line interface can be insecure" "$stderr_tmp"
   rm -f "$stderr_tmp"
   return $exit_code
 }
@@ -92,7 +92,7 @@ create_zip() {
   local source_dir="$1"
   local zip_file="$2"
 
-  zip -j "$zip_file" "$source_dir"/*.sql 2>&1
+  zip -j "$zip_file" "$source_dir"/*.sql 2>&1 >/dev/null
 }
 
 # ── Move zip to iCloud ────────────────────────────────────────────────────────
