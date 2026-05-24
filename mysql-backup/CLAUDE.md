@@ -70,7 +70,8 @@ Required variables:
 The plist file registers a launchd agent for the current user (not system-wide).
 
 ```bash
-# Register (do once, survives reboot)
+# Install (copy plist and register — do once, survives reboot)
+cp ~/scripts/mysql-backup/com.jtarnvik.mysqlbackup.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.jtarnvik.mysqlbackup.plist
 
 # Unregister
@@ -83,11 +84,13 @@ launchctl start com.jtarnvik.mysqlbackup
 launchctl list | grep jtarnvik
 
 # View logs
-tail -f ~/scripts/mysql_backup.log
+tail -f ~/scripts/mysql-backup/mysql_backup.log
 ```
 
-The plist must be placed in `~/Library/LaunchAgents/` and the script path
-inside it must be updated to match where the repo is cloned.
+The plist has paths hardcoded for the Mac Mini (`~/scripts/mysql-backup/`). If
+deploying to a different machine, update the script path, log paths, and
+`EnvironmentVariables/PATH` to match the new environment. `docker` must be on
+the PATH — launchd does not inherit the user's shell PATH.
 
 ---
 
