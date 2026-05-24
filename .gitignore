@@ -1,0 +1,9 @@
+# Secrets — never commit the real config file
+*.conf
+
+# macOS noise
+.DS_Store
+
+# Log files
+*.log
+/scripts.iml

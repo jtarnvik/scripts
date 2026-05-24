@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.jtarnvik.mysqlbackup.plist
+  Place in: ~/Library/LaunchAgents/
+
+  Register:   launchctl load ~/Library/LaunchAgents/com.jtarnvik.mysqlbackup.plist
+  Unregister: launchctl unload ~/Library/LaunchAgents/com.jtarnvik.mysqlbackup.plist
+  Run now:    launchctl start com.jtarnvik.mysqlbackup
+  Check log:  tail -f ~/scripts/mysql_backup.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jtarnvik.mysqlbackup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- Update this path to wherever you cloned the repo -->
+        <string>/Users/jesper/scripts/mysql_backup.sh</string>
+    </array>
+
+    <!-- Run every Sunday at 02:00 -->
+    <!-- Weekday: 0=Sunday, 1=Monday ... 6=Saturday -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Do not run immediately on launchctl load -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Log stdout and stderr to the same file -->
+    <key>StandardOutPath</key>
+    <string>/Users/jesper/scripts/mysql_backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jesper/scripts/mysql_backup.log</string>
+</dict>
+</plist>

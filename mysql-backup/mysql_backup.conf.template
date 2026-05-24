@@ -1,0 +1,20 @@
+# mysql_backup.conf.template
+# Copy this file to mysql_backup.conf and fill in the values.
+# mysql_backup.conf is excluded from git via .gitignore — never commit it.
+
+# Docker container name or ID
+MYSQL_CONTAINER=""
+
+# MySQL credentials
+MYSQL_USER=""
+MYSQL_PASSWORD=""
+
+# Where backup zip files are staged before moving to iCloud
+BACKUP_DIR=""
+
+# iCloud folder where zip files are moved for cloud sync and long-term storage
+ICLOUD_DIR=""
+
+# Pushover credentials (from pushover.net)
+PUSHOVER_USER_KEY=""
+PUSHOVER_API_TOKEN=""
