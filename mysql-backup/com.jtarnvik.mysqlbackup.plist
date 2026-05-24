@@ -15,11 +15,17 @@
     <key>Label</key>
     <string>com.jtarnvik.mysqlbackup</string>
 
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
         <!-- Update this path to wherever you cloned the repo -->
-        <string>/Users/jesper/scripts/mysql_backup.sh</string>
+        <string>/Users/jesper/scripts/mysql-backup/mysql_backup.sh</string>
     </array>
 
     <!-- Run every Sunday at 02:00 -->
@@ -40,8 +46,8 @@
 
     <!-- Log stdout and stderr to the same file -->
     <key>StandardOutPath</key>
-    <string>/Users/jesper/scripts/mysql_backup.log</string>
+    <string>/Users/jesper/scripts/mysql-backup/mysql_backup.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jesper/scripts/mysql_backup.log</string>
+    <string>/Users/jesper/scripts/mysql-backup/mysql_backup.log</string>
 </dict>
 </plist>
