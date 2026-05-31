@@ -1,0 +1,7 @@
+# raid_watch.conf.template
+# Copy this file to raid_watch.conf and fill in the values.
+# raid_watch.conf is excluded from git via .gitignore — never commit it.
+
+# Pushover credentials (from pushover.net)
+PUSHOVER_USER_KEY=""
+PUSHOVER_API_TOKEN=""
