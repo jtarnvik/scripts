@@ -89,14 +89,44 @@ backup_sqlite() {
   return $exit_code
 }
 
+# ── Generate the human-readable HTML export ───────────────────────────────────
+# Usage: export_recipes <output_dir>
+# Reads the snapshot in $WORK_DIR (not the live DB) and writes a self-contained
+# index.html + copied photos into <output_dir>, via paprika_export.py. Prints
+# the generator's summary line ("recipes=N photos=M skipped=K") on success, or
+# error text on failure; returns the generator's exit code. Non-fatal to the
+# overall backup — the caller keeps going so the SQLite snapshot is still saved.
+export_recipes() {
+  local output_dir="$1"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 not found on PATH — cannot generate HTML export"
+    return 1
+  fi
+
+  # PAPRIKA_DB_DIR is …/Data/Database, so photos live in its sibling …/Data/Photos.
+  local photos_dir
+  photos_dir="$(dirname "$PAPRIKA_DB_DIR")/Photos"
+
+  python3 "$(dirname "$0")/paprika_export.py" \
+    "$WORK_DIR/Paprika.sqlite" "$photos_dir" "$output_dir"
+}
+
 # ── Package the snapshot into a zip ───────────────────────────────────────────
 # Usage: create_zip <source_dir> <zip_file>
 # Returns: any error output (empty string = success)
+# Recursive + path-preserving so the export/ subtree survives; Paprika.sqlite
+# still lands at the zip root. Zips only the intended items (not `.`) so any
+# stray -wal/-shm sidecars are never included. export/ is added only if the
+# export step produced it.
 create_zip() {
   local source_dir="$1"
   local zip_file="$2"
 
-  zip -j "$zip_file" "$source_dir"/* 2>&1 >/dev/null
+  local items=(Paprika.sqlite)
+  [ -d "$source_dir/export" ] && items+=(export)
+
+  ( cd "$source_dir" && zip -r "$zip_file" "${items[@]}" ) 2>&1 >/dev/null
 }
 
 # ── Move zip to iCloud ────────────────────────────────────────────────────────
@@ -146,6 +176,19 @@ main() {
     exit 1
   fi
 
+  # ── Generate HTML export (non-fatal) ────────────────────────────────────────
+  echo "  Generating HTML export..."
+  local export_summary export_exit
+  export_summary=$(export_recipes "$WORK_DIR/export" 2>&1)
+  export_exit=$?
+  if [ $export_exit -ne 0 ]; then
+    errors="$errors\n[export]: $export_summary"
+    echo "  WARNING: HTML export failed: $export_summary"
+    export_summary=""
+  else
+    echo "  Export: $export_summary"
+  fi
+
   # ── Package into zip ────────────────────────────────────────────────────────
   echo "  Creating zip: $zip_file"
   local zip_errors
@@ -170,10 +213,12 @@ main() {
 
   # ── Notify ──────────────────────────────────────────────────────────────────
   if [ -z "$errors" ]; then
+    local export_note=""
+    [ -n "$export_summary" ] && export_note=" + HTML export ($export_summary)"
     echo "[$(date)] Backup complete: $ICLOUD_DIR/paprika_backup_$date.zip ($zip_size)"
     send_pushover \
       "✅ Paprika Backup OK - Mac Mini" \
-      "SQLite snapshot backed up.\nFile: paprika_backup_$date.zip ($zip_size)" \
+      "SQLite snapshot${export_note} backed up.\nFile: paprika_backup_$date.zip ($zip_size)" \
       -1
   else
     echo "[$(date)] Backup completed with errors."

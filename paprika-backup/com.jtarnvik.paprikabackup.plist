@@ -17,8 +17,11 @@
 
     <key>EnvironmentVariables</key>
     <dict>
+        <!-- /opt/homebrew/bin (Apple Silicon) + /usr/local/bin (Intel) so the
+             Step 2 export finds Homebrew's python3 — launchd does not inherit
+             the shell PATH. -->
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 
     <key>ProgramArguments</key>
