@@ -2,12 +2,16 @@
 # =============================================================================
 # paprika_export.py
 #
-# Generates a human-readable, self-contained HTML export of all (non-trashed)
-# Paprika recipes from a Paprika SQLite database. Reads the DB read-only and
-# writes:
+# Generates a human-readable HTML export of all (non-trashed) Paprika recipes
+# from a Paprika SQLite database. Reads the DB read-only and writes:
 #
 #   <output_dir>/index.html          all recipes, one page
-#   <output_dir>/photos/<uid>/<f>    each recipe's photos, copied in
+#
+# Images are NOT copied here — the backup script copies Paprika's whole
+# Data/Photos tree into <output_dir>/Photos, and this page references those
+# files as "Photos/<recipe-uid>/<file>". A referenced photo that is not present
+# in that archive (e.g. Paprika has not downloaded it on this Mac) is counted as
+# skipped and simply gets no <img>; the DB snapshot still records its filename.
 #
 # The purpose is durability: proof that the SQLite backup contains all recipe
 # data, readable in any browser even if Paprika (the app / its sync servers)
@@ -20,8 +24,8 @@
 #   paprika_export.py <db_file> <photos_dir> <output_dir>
 #
 #   <db_file>     path to the Paprika.sqlite snapshot (read-only)
-#   <photos_dir>  Paprika's Data/Photos directory (source of image files)
-#   <output_dir>  directory to create the export in (created if missing)
+#   <photos_dir>  the copied Photos/ archive to reference/existence-check against
+#   <output_dir>  directory to write index.html into (created if missing)
 #
 # Prints a one-line summary on success:  recipes=N photos=M skipped=K
 # Exits non-zero only on a hard failure (cannot open the database).
@@ -29,7 +33,6 @@
 
 import html
 import re
-import shutil
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -121,27 +124,20 @@ def fetch_photo_filenames(conn, recipe_uid, primary_photo):
     return [n for n in names if not (n in seen or seen.add(n))]
 
 
-def copy_photos(photos_dir, output_dir, recipe_uid, filenames):
-    """Copy a recipe's photos into <output_dir>/photos/<uid>/. Returns
-    (copied_relpaths, copied_count, skipped_count). Missing/unreadable files are
-    skipped, never fatal (e.g. a photo not yet downloaded, or a permissions
-    block)."""
+def resolve_photos(photos_dir, recipe_uid, filenames):
+    """Reference a recipe's photos from the copied Photos/ archive. Returns
+    (rel_paths, present_count, missing_count). A referenced photo not present in
+    the archive (e.g. not downloaded on this Mac) is counted as missing and gets
+    no <img>; the DB snapshot still records its filename."""
     rel_paths = []
-    copied = skipped = 0
+    present = missing = 0
     for name in filenames:
-        src = photos_dir / recipe_uid / name
-        try:
-            if not src.is_file():
-                skipped += 1
-                continue
-            dest_dir = output_dir / "photos" / recipe_uid
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest_dir / name)
-            rel_paths.append(f"photos/{recipe_uid}/{name}")
-            copied += 1
-        except OSError:
-            skipped += 1
-    return rel_paths, copied, skipped
+        if (photos_dir / recipe_uid / name).is_file():
+            rel_paths.append(f"Photos/{recipe_uid}/{name}")
+            present += 1
+        else:
+            missing += 1
+    return rel_paths, present, missing
 
 
 PAGE_CSS = """
@@ -298,8 +294,8 @@ def main(argv):
     for r in recipes:
         categories = fetch_categories(conn, join, r["Z_PK"])
         filenames = fetch_photo_filenames(conn, r["ZUID"], r["ZPHOTO"])
-        photo_paths, copied, skipped = copy_photos(photos_dir, output_dir, r["ZUID"] or "", filenames)
-        total_photos += copied
+        photo_paths, present, skipped = resolve_photos(photos_dir, r["ZUID"] or "", filenames)
+        total_photos += present
         total_skipped += skipped
 
         name = html.escape(r["ZNAME"] or "(namnlös)")

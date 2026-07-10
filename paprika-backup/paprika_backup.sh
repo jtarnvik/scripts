@@ -89,13 +89,36 @@ backup_sqlite() {
   return $exit_code
 }
 
+# ── Copy the full photo library ───────────────────────────────────────────────
+# Usage: backup_photos <dest_dir>
+# Copies Paprika's entire Data/Photos tree into <dest_dir>/Photos so every
+# locally-stored image is archived — not just the ones referenced by the HTML
+# page. Photos Paprika has not downloaded on this Mac are not on disk and cannot
+# be copied (the DB still records their filenames). Prints error text and
+# returns non-zero on failure; non-fatal to the overall backup.
+backup_photos() {
+  local dest_dir="$1"
+
+  # PAPRIKA_DB_DIR is …/Data/Database, so photos live in its sibling …/Data/Photos.
+  local photos_src
+  photos_src="$(dirname "$PAPRIKA_DB_DIR")/Photos"
+
+  if [ ! -d "$photos_src" ]; then
+    echo "photos directory not found: $photos_src"
+    return 1
+  fi
+
+  cp -R "$photos_src" "$dest_dir/Photos" 2>&1
+}
+
 # ── Generate the human-readable HTML export ───────────────────────────────────
 # Usage: export_recipes <output_dir>
-# Reads the snapshot in $WORK_DIR (not the live DB) and writes a self-contained
-# index.html + copied photos into <output_dir>, via paprika_export.py. Prints
-# the generator's summary line ("recipes=N photos=M skipped=K") on success, or
-# error text on failure; returns the generator's exit code. Non-fatal to the
-# overall backup — the caller keeps going so the SQLite snapshot is still saved.
+# Reads the snapshot in $WORK_DIR (not the live DB) and writes index.html into
+# <output_dir>, referencing images in the sibling Photos/ archive copied by
+# backup_photos. Prints the generator's summary ("recipes=N photos=M skipped=K")
+# on success, or error text on failure; returns the generator's exit code.
+# Non-fatal to the overall backup — the caller keeps going so the SQLite snapshot
+# is still saved.
 export_recipes() {
   local output_dir="$1"
 
@@ -104,27 +127,24 @@ export_recipes() {
     return 1
   fi
 
-  # PAPRIKA_DB_DIR is …/Data/Database, so photos live in its sibling …/Data/Photos.
-  local photos_dir
-  photos_dir="$(dirname "$PAPRIKA_DB_DIR")/Photos"
-
+  # The generator references the copied Photos/ archive (existence-checked there).
   python3 "$(dirname "$0")/paprika_export.py" \
-    "$WORK_DIR/Paprika.sqlite" "$photos_dir" "$output_dir"
+    "$WORK_DIR/Paprika.sqlite" "$output_dir/Photos" "$output_dir"
 }
 
-# ── Package the snapshot into a zip ───────────────────────────────────────────
+# ── Package the backup into a zip ─────────────────────────────────────────────
 # Usage: create_zip <source_dir> <zip_file>
 # Returns: any error output (empty string = success)
-# Recursive + path-preserving so the export/ subtree survives; Paprika.sqlite
-# still lands at the zip root. Zips only the intended items (not `.`) so any
-# stray -wal/-shm sidecars are never included. export/ is added only if the
-# export step produced it.
+# Zips explicit items (Paprika.sqlite at the root, plus index.html and the
+# Photos/ archive when present) — never `.`, so stray -wal/-shm sidecars are
+# excluded. index.html/Photos are added only if their steps produced them.
 create_zip() {
   local source_dir="$1"
   local zip_file="$2"
 
   local items=(Paprika.sqlite)
-  [ -d "$source_dir/export" ] && items+=(export)
+  [ -f "$source_dir/index.html" ] && items+=(index.html)
+  [ -d "$source_dir/Photos" ] && items+=(Photos)
 
   ( cd "$source_dir" && zip -r "$zip_file" "${items[@]}" ) 2>&1 >/dev/null
 }
@@ -176,10 +196,19 @@ main() {
     exit 1
   fi
 
+  # ── Copy the photo library (non-fatal) ──────────────────────────────────────
+  echo "  Copying photo library..."
+  local photos_errors
+  photos_errors=$(backup_photos "$WORK_DIR")
+  if [ $? -ne 0 ] || [ -n "$photos_errors" ]; then
+    errors="$errors\n[photos]: $photos_errors"
+    echo "  WARNING: copying photo library failed: $photos_errors"
+  fi
+
   # ── Generate HTML export (non-fatal) ────────────────────────────────────────
   echo "  Generating HTML export..."
   local export_summary export_exit
-  export_summary=$(export_recipes "$WORK_DIR/export" 2>&1)
+  export_summary=$(export_recipes "$WORK_DIR" 2>&1)
   export_exit=$?
   if [ $export_exit -ne 0 ]; then
     errors="$errors\n[export]: $export_summary"
@@ -187,6 +216,14 @@ main() {
     export_summary=""
   else
     echo "  Export: $export_summary"
+    # Undownloaded photos (skipped>0) aren't on this Mac's disk, so they're not
+    # in the archive. Surface that as a warning so it isn't silently shipped.
+    local skipped
+    skipped=$(printf '%s\n' "$export_summary" | sed -n 's/.*skipped=\([0-9][0-9]*\).*/\1/p')
+    if [ -n "$skipped" ] && [ "$skipped" -gt 0 ]; then
+      errors="$errors\n[photos]: $skipped photo(s) not downloaded on this Mac — open Paprika to download them so they're included"
+      echo "  WARNING: $skipped photo(s) not downloaded locally — not in the archive"
+    fi
   fi
 
   # ── Package into zip ────────────────────────────────────────────────────────
@@ -218,13 +255,13 @@ main() {
     echo "[$(date)] Backup complete: $ICLOUD_DIR/paprika_backup_$date.zip ($zip_size)"
     send_pushover \
       "✅ Paprika Backup OK - Mac Mini" \
-      "SQLite snapshot${export_note} backed up.\nFile: paprika_backup_$date.zip ($zip_size)" \
+      "SQLite snapshot + photo library${export_note} backed up.\nFile: paprika_backup_$date.zip ($zip_size)" \
       -1
   else
-    echo "[$(date)] Backup completed with errors."
+    echo "[$(date)] Backup completed with warnings."
     send_pushover \
-      "⚠️ Paprika Backup — Errors Occurred - Mac Mini" \
-      "SQLite snapshot taken, but later steps had errors:$(echo -e "$errors")\nFile may be missing or partial: paprika_backup_$date.zip" \
+      "⚠️ Paprika Backup — Warnings - Mac Mini" \
+      "Backup saved with warnings:$(echo -e "$errors")\nFile: paprika_backup_$date.zip ($zip_size)" \
       1
   fi
 }

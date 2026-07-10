@@ -4,15 +4,16 @@ This repo contains a weekly automated backup solution for **Paprika Recipe Manag
 Mac Mini home server (the same always-on host as the mysql-backup and raid-watch jobs). The Mac Mini
 is not publicly exposed.
 
-Paprika stores its data in a local SQLite database that syncs via iCloud/CloudKit. This job takes a
-consistent snapshot of that database, generates a human-readable HTML export from it, zips both
-together, copies the zip to iCloud for off-machine storage, and reports the outcome via a Pushover
-push notification.
+Paprika stores its data in a local SQLite database plus a folder of photo files, both synced via
+iCloud/CloudKit. This job takes a consistent snapshot of the database, copies the whole photo library,
+generates a human-readable HTML export, zips all three together, copies the zip to iCloud for
+off-machine storage, and reports the outcome via a Pushover push notification.
 
-> **Two backup types, both implemented.** (1) The **SQLite snapshot** is the real backup — restores the
-> full app state. (2) The **HTML export** (generated from that snapshot, with photos) is durability
-> insurance: a copy you can read in any browser even if Paprika (the company / its sync servers) ever
-> disappears. Its job is to *prove the DB holds all the recipe data* in readable form — completeness
+> **What the zip contains:** `Paprika.sqlite` (the DB snapshot — the real backup, restores full app
+> state), `Photos/` (a complete copy of every locally-stored image file), and `index.html` (a
+> human-readable page listing every recipe, referencing images in `Photos/`). The HTML export is
+> durability insurance: a copy you can read in any browser even if Paprika (the company / its sync
+> servers) ever disappears. Its job is to *prove the backup holds all the recipe data* — completeness
 > over styling. See "The HTML export" below.
 
 ---
@@ -20,10 +21,11 @@ push notification.
 ## What the project does
 
 - Snapshots the live Paprika SQLite database using `sqlite3 .backup` (safe while Paprika is running)
-- Generates a self-contained HTML export from the snapshot (all recipes + photos) via `paprika_export.py`
-- Packages both into a single dated zip file (`paprika_backup_YYYY-MM-DD.zip`)
+- Copies Paprika's entire `Data/Photos` library so every locally-stored image is archived
+- Generates a human-readable `index.html` from the snapshot (all recipes), referencing `Photos/`
+- Packages all three into a single dated zip file (`paprika_backup_YYYY-MM-DD.zip`)
 - Moves the zip to an iCloud folder for cloud sync and long-term storage
-- Sends a Pushover push notification to an iPhone on success or failure
+- Sends a Pushover push notification — ✅ on success, ⚠️ if anything is incomplete (e.g. undownloaded photos)
 - Runs weekly via macOS `launchd` (Sunday 03:00 by default)
 
 ---
@@ -78,10 +80,13 @@ Default `PAPRIKA_DB_DIR` (verified on the Mac Mini, macOS convention — same on
 - `send_pushover()` — sends a push notification via the Pushover REST API
 - `backup_sqlite()` — snapshots the live DB with `sqlite3 "$DB" ".backup ..."` into a single
   checkpointed `Paprika.sqlite`; guards for a missing DB file and returns sqlite3's exit code
-- `export_recipes()` — runs `paprika_export.py` against the snapshot to build `export/` (index.html +
-  photos); resolves the photos dir as `"$(dirname "$PAPRIKA_DB_DIR")/Photos"`; **non-fatal**
-- `create_zip()` — packages the snapshot **and** `export/` into the dated zip. Zips explicit items
-  (`Paprika.sqlite` + `export`), not `.`, so stray `-wal`/`-shm` sidecars are never included
+- `backup_photos()` — `cp -R` of Paprika's entire `Data/Photos` tree into `$WORK_DIR/Photos`
+  (resolved as `"$(dirname "$PAPRIKA_DB_DIR")/Photos"`); archives every locally-stored image;
+  **non-fatal**
+- `export_recipes()` — runs `paprika_export.py` against the snapshot to write `index.html`, which
+  references images in the copied `Photos/`; **non-fatal**
+- `create_zip()` — packages the dated zip from explicit items (`Paprika.sqlite` + `index.html` +
+  `Photos`), not `.`, so stray `-wal`/`-shm` sidecars are never included
 - `move_to_icloud()` — creates the iCloud dir if needed and moves the zip into it
 - `cleanup()` — removes the temp working directory (registered via `trap EXIT`)
 - `main()` — orchestrates the full backup flow
@@ -89,12 +94,16 @@ Default `PAPRIKA_DB_DIR` (verified on the Mac Mini, macOS convention — same on
 The HTML generator, `paprika_export.py`, is a stdlib-only Python 3 script:
 `paprika_export.py <snapshot.sqlite> <photos_dir> <output_dir>`. It opens the snapshot with
 `immutable=1` (read-only, and never creates sidecar files), queries live recipes (`ZINTRASH = 0`),
-copies each recipe's photos in, and writes one self-contained `index.html` (TOC + a section per
-recipe with every meaningful field). It prints `recipes=N photos=M skipped=K`.
+and writes one `index.html` (TOC + a section per recipe with every meaningful field) that references
+images as `Photos/<recipe-uid>/<file>`. It does **not** copy images — it existence-checks each
+against the copied `Photos/` archive and counts any that are absent (undownloaded) as `skipped`. It
+prints `recipes=N photos=M skipped=K`.
 
 A failed snapshot is fatal (loud ❌ notification and exit), because it means there is nothing to back
-up. The HTML export is **best-effort**: if it fails, the SQLite snapshot is still zipped and shipped
-and the run reports ⚠️ instead of ❌. Errors in the zip/iCloud steps are likewise accumulated into a ⚠️.
+up. The photo copy and HTML export are **best-effort**: if either fails, the SQLite snapshot is still
+zipped and shipped and the run reports ⚠️ instead of ❌. `skipped > 0` (photos referenced but not on
+this Mac's disk) is also raised as a ⚠️ naming the count, so an incomplete archive is never shipped
+silently. Errors in the zip/iCloud steps are likewise accumulated into a ⚠️.
 
 ---
 
@@ -144,10 +153,11 @@ ERROR: could not snapshot Paprika database: Error: unable to open database
 process launch — no unload/load or reboot needed. This grant covers all bash scripts launched this
 way; acceptable on a private home server. Re-do this on any new machine the backup is deployed to.
 
-The `/bin/bash` grant also covers the `python3` child that copies photos from `…/Data/Photos` for the
-HTML export (child processes inherit the responsible-process grant). If a launchd run ever logs
-`authorization denied` on photo copy, the export degrades gracefully — it still writes `index.html`
-(text) and just reports skipped photos, so the backup never fails because of it.
+The protected reads are the `sqlite3` snapshot **and** the `cp -R` of `…/Data/Photos` — both bash
+children, covered by the same `/bin/bash` grant. `python3` only reads the snapshot copy and the
+copied `Photos/` in the temp work dir (not protected), so it needs no grant of its own. If a launchd
+run ever logs `authorization denied` on the photo copy, the backup still ships the DB snapshot and
+reports a ⚠️.
 
 ---
 
@@ -167,18 +177,19 @@ runs via launchd. On success you should see a new `paprika_backup_<date>.zip` in
 
 ## Restoring from a backup
 
-The zip contains `Paprika.sqlite` at the root plus an `export/` folder (`index.html` + `photos/`).
-Restore uses **only** `Paprika.sqlite`; the `export/` folder is read-only reference — open
-`export/index.html` in a browser to read the recipes without the app. The snapshot is a single,
-already-checkpointed `Paprika.sqlite` (the WAL is merged in at `.backup` time), so restoring does
-**not** involve `-wal`/`-shm` files.
+The zip contains three things at the root: `Paprika.sqlite` (the DB snapshot), `Photos/` (the whole
+image library), and `index.html` (the readable page, referencing `Photos/`). Restore uses **only**
+`Paprika.sqlite`; `index.html` + `Photos/` are read-only reference — open `index.html` in a browser
+to read the recipes with images and no app. The snapshot is a single, already-checkpointed
+`Paprika.sqlite` (the WAL is merged in at `.backup` time), so restoring does **not** involve
+`-wal`/`-shm` files.
 
 ```bash
 # Unzip
 unzip paprika_backup_2026-07-10.zip -d ./restore
 
-# Read the recipes in a browser (no app needed)
-open ./restore/export/index.html
+# Read the recipes in a browser (no app needed) — images resolve from ./restore/Photos
+open ./restore/index.html
 
 # Inspect the DB before restoring (optional)
 sqlite3 ./restore/Paprika.sqlite "PRAGMA integrity_check;"
@@ -190,7 +201,9 @@ To restore into the live app:
 2. Replace `Paprika.sqlite` in the Database dir with the one from the zip.
 3. **Delete** the now-stale `Paprika.sqlite-wal` and `Paprika.sqlite-shm` in that dir (the restored
    file is already checkpointed; leaving old WAL/SHM would corrupt the view of the DB).
-4. Relaunch Paprika.
+4. Optionally copy the zip's `Photos/` contents back into `…/Data/Photos` (Paprika also re-downloads
+   images from iCloud if the account still exists).
+5. Relaunch Paprika.
 
 The recipe name is stored in `ZRECIPE.ZNAME` (Paprika uses a Core Data `Z`-prefixed schema):
 
@@ -222,10 +235,16 @@ All dependencies are standard macOS tooling — no additional software or subscr
 - Only one backup zip is kept per date. Running the script twice on the same day overwrites the first.
 - **Full Disk Access must be granted to `/bin/bash`** for the launchd run to read Paprika's Group
   Container (see the Scheduling section). Manual Terminal runs are unaffected.
-- The **HTML export is best-effort / non-fatal**: any failure (missing `python3`, generator error,
-  photo-copy permission block) yields a ⚠️ notification, but the SQLite snapshot is still backed up.
-- The export **excludes trashed recipes** (`ZINTRASH = 0`); missing/undownloaded photos are skipped
-  and counted (`skipped=K` in the summary), never fatal.
+- The **photo copy and HTML export are best-effort / non-fatal**: any failure (missing `python3`,
+  generator error, `cp` permission block) yields a ⚠️ notification, but the SQLite snapshot is still
+  backed up.
+- The archive only contains photos Paprika has **downloaded on this Mac**. Paprika fetches photos
+  lazily, so a rarely-used server may be missing many. The generator counts referenced-but-absent
+  photos as `skipped=K`, and **`skipped > 0` raises a ⚠️** naming the count — the fix is to open
+  Paprika on that Mac and let it download the photos (they then persist on disk and future runs
+  capture them).
+- The export **excludes trashed recipes** (`ZINTRASH = 0`). `Photos/` is a copy of the *entire* photo
+  library on disk (including large/thumbnail variants), a superset of the images the page references.
 - If the Mac is asleep at the scheduled time, launchd will not run the job; it runs at the next
   scheduled time. Set `RunAtLoad` to `true` in the plist to catch up on next login if desired.
 - A missing or unreadable database is fatal and sends a ❌ notification — a mis-configured
@@ -242,18 +261,24 @@ permission under launchd. Reading the snapshot ourselves is fully headless, robu
 permissions — and since the DB already holds every field, the generated page *is* the proof that the
 backup is complete.
 
+Photos are archived separately: `backup_photos()` does a `cp -R` of the entire `Data/Photos` tree into
+the zip's `Photos/`, so the backup holds *every* locally-stored image (not just the ones the page
+shows). The generator then **references** that shared copy rather than duplicating images — one copy in
+the zip, used both as the raw archive and by the page.
+
 `paprika_export.py <snapshot.sqlite> <photos_dir> <output_dir>` (stdlib-only Python 3):
 - Opens the snapshot with `immutable=1` (read-only; never creates `-wal`/`-shm` sidecars).
 - Selects live recipes (`ZRECIPE` where `ZINTRASH = 0`), ordered by name.
 - For each recipe: gathers categories (via the Core Data join table, discovered dynamically since its
   entity-numbered name/columns can vary), and photo filenames from `ZRECIPEPHOTO` (fallback
-  `ZRECIPE.ZPHOTO`); copies existing photos from `<photos_dir>/<recipe ZUID>/<file>` into
-  `<output_dir>/photos/<ZUID>/`.
-- Writes one self-contained `index.html`: embedded CSS (light/dark, printable), a table-of-contents,
-  then a section per recipe with every meaningful field (badges for servings/times/difficulty/rating/
-  categories/date, photos, source link, description, ingredients, directions, notes, nutrition). All
-  text is `html.escape`-d, then lightly formatted (newlines → `<br>`, `**bold**` → `<strong>`).
-- Prints `recipes=N photos=M skipped=K`.
+  `ZRECIPE.ZPHOTO`). For each filename it **existence-checks** `<photos_dir>/<ZUID>/<file>` in the
+  copied `Photos/` archive: present → referenced as `Photos/<ZUID>/<file>`; absent (undownloaded) →
+  counted as `skipped`, no `<img>`.
+- Writes one `index.html`: embedded CSS (light/dark, printable), a table-of-contents, then a section
+  per recipe with every meaningful field (badges for servings/times/difficulty/rating/categories/date,
+  photos, source link, description, ingredients, directions, notes, nutrition). All text is
+  `html.escape`-d, then lightly formatted (newlines → `<br>`, `**bold**` → `<strong>`).
+- Prints `recipes=N photos=M skipped=K` (M = referenced & present, K = referenced & missing).
 
 Design intent: completeness over styling — *basic but nice*. It will realistically almost never be
 needed; if it ever is, the layout can be improved then.
