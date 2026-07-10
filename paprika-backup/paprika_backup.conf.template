@@ -1,0 +1,18 @@
+# paprika_backup.conf.template
+# Copy this file to paprika_backup.conf and fill in the values.
+# paprika_backup.conf is excluded from git via .gitignore — never commit it.
+
+# Directory holding the Paprika Recipe Manager 3 SQLite database.
+# Default macOS location (verified on the Mac Mini):
+#   /Users/jesper/Library/Group Containers/72KVKW69K8.com.hindsightlabs.paprika.mac.v3/Data/Database
+PAPRIKA_DB_DIR=""
+
+# Where backup zip files are staged before moving to iCloud
+BACKUP_DIR=""
+
+# iCloud folder where zip files are moved for cloud sync and long-term storage
+ICLOUD_DIR=""
+
+# Pushover credentials (from pushover.net)
+PUSHOVER_USER_KEY=""
+PUSHOVER_API_TOKEN=""

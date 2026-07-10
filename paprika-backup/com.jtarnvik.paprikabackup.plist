@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.jtarnvik.paprikabackup.plist
+  Place in: ~/Library/LaunchAgents/
+
+  Register:   launchctl load ~/Library/LaunchAgents/com.jtarnvik.paprikabackup.plist
+  Unregister: launchctl unload ~/Library/LaunchAgents/com.jtarnvik.paprikabackup.plist
+  Run now:    launchctl start com.jtarnvik.paprikabackup
+  Check log:  tail -f ~/scripts/paprika-backup/paprika_backup.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jtarnvik.paprikabackup</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- Update this path to wherever you cloned the repo -->
+        <string>/Users/jesper/scripts/paprika-backup/paprika_backup.sh</string>
+    </array>
+
+    <!-- Run every Sunday at 03:00 (one hour after the mysql backup at 02:00) -->
+    <!-- Weekday: 0=Sunday, 1=Monday ... 6=Saturday -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Do not run immediately on launchctl load -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Log stdout and stderr to the same file -->
+    <key>StandardOutPath</key>
+    <string>/Users/jesper/scripts/paprika-backup/paprika_backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jesper/scripts/paprika-backup/paprika_backup.log</string>
+</dict>
+</plist>
