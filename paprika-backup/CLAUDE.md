@@ -1,151 +1,228 @@
-# Paprika Backup — Implementation Plan
+# Paprika Backup — Project Context
 
-> **Status: planned, not yet built.** This doc holds the agreed plan. Once Step 1 is implemented,
-> rewrite this file into the sibling *usage* structure (see "CLAUDE.md handling" below).
+This repo contains a weekly automated backup solution for **Paprika Recipe Manager 3** running on a
+Mac Mini home server (the same always-on host as the mysql-backup and raid-watch jobs). The Mac Mini
+is not publicly exposed.
 
-## Context
+Paprika stores its data in a local SQLite database that syncs via iCloud/CloudKit. This job takes a
+consistent snapshot of that database, zips it, copies the zip to iCloud for off-machine storage, and
+reports the outcome via a Pushover push notification.
 
-`scripts/paprika-backup/` currently contains **only** this `CLAUDE.md`. Its sibling folders
-`scripts/mysql-backup/` and `scripts/raid-watch/` are fully implemented and follow a shared,
-mature pattern: a single main `*.sh` script organised into functions, a `*.conf.template` +
-gitignored `*.conf` for secrets/paths, a `com.jtarnvik.*.plist` launchd agent, and a
-*usage-oriented* `CLAUDE.md` (What it does / Files / Configuration / Script structure / Scheduling /
-Testing / Restoring / Dependencies / Known behaviour).
+> **Two backup types are planned.** Step 1 (this doc, implemented) backs up the **SQLite database**.
+> Step 2 (pending) adds an **HTML export** via Paprika's built-in export — a human-readable copy that
+> survives even if Paprika the company shuts its sync servers down. See "Planned — Step 2" below.
 
-The goal is to bring Paprika up to the same standard. Paprika needs **two** backup types:
-(1) a copy of the app's live SQLite DB, (2) an export via the app's built-in HTML export
-(AppleScript-driven). **Step 1 is the SQLite backup + launchd agent only.** The AppleScript export
-is deferred to Step 2 (outlined below, not built now).
+---
 
-The backup must behave like the mysql backup: produce a dated **zip**, **copy it to the iCloud
-folder**, and send **Pushover** success/failure notifications — reusing the exact
-`load_config` / `send_pushover` idioms from the sibling scripts.
+## What the project does
 
-Verified facts:
-- DB files exist at `~/Library/Group Containers/72KVKW69K8.com.hindsightlabs.paprika.mac.v3/Data/Database/`
-  (`Paprika.sqlite`, `Paprika.sqlite-wal`, `Paprika.sqlite-shm`) — **but this was verified on the
-  development MacBook Pro only.** The backup actually runs on the **always-on Mac Mini home server**
-  (same host as mysql/raid). The path/files must still be confirmed there — see Step 0.
-- The DB is in **WAL mode and actively syncing** (`-wal` was 3.2 MB on the MacBook), so a hot copy
-  needs a consistent-snapshot method.
-- **Decision (user-confirmed):** copy via `sqlite3 "$DB/Paprika.sqlite" ".backup dest"` → a single
-  consistent `Paprika.sqlite`, safe while Paprika runs. No torn-copy risk. `sqlite3` ships with macOS.
-- Repo-level `.gitignore` already excludes `*.conf` and `*.log`; sibling folders each add their own too.
+- Snapshots the live Paprika SQLite database using `sqlite3 .backup` (safe while Paprika is running)
+- Packages the snapshot into a single dated zip file (`paprika_backup_YYYY-MM-DD.zip`)
+- Moves the zip to an iCloud folder for cloud sync and long-term storage
+- Sends a Pushover push notification to an iPhone on success or failure
+- Runs weekly via macOS `launchd` (Sunday 03:00 by default)
 
-## Step 0 — verify the DB location on the always-on Mac Mini — ✅ DONE
+---
 
-Verified on the Mac Mini (2026-07-09):
-- DB path matches the documented default exactly → `PAPRIKA_DB_DIR` is the default, no override needed.
-- `Paprika.sqlite` / `-wal` / `-shm` all present; `-wal` ~1.1 MB (live WAL, confirms hot-copy method needed).
-- `sqlite3` 3.43.2 present; opened the live DB and `.tables` returned the real Paprika/Core Data schema
-  (`ZRECIPE`, `ZGROCERYLIST`, `ZMEAL`, …) → DB is populated + syncing, and `.backup` will work.
-- Repo is deployed at `~/scripts` on the Mini, matching the plist path (`/Users/jesper/scripts/paprika-backup/`).
+## Files
 
-Original instructions (kept for reference / re-verification on any new machine):
+| File | Committed | Purpose |
+|------|-----------|---------|
+| `paprika_backup.sh` | ✅ | Main backup script |
+| `paprika_backup.conf.template` | ✅ | Template showing required config variables |
+| `paprika_backup.conf` | ❌ | Local secrets/paths — created from template, never committed |
+| `com.jtarnvik.paprikabackup.plist` | ✅ | macOS launchd agent for scheduling |
+| `.gitignore` | ✅ | Excludes `*.conf` and `*.log` |
 
-The DB path was confirmed only on the development MacBook Pro. Since the backup runs on the Mac Mini,
-confirm there **before** writing/deploying the script — a wrong or absent path is the single most
-likely reason Step 1 fails silently. Manual check to run on the Mac Mini (the app, macOS version and
-iCloud account may differ from the MacBook):
+---
+
+## Configuration
+
+All secrets and environment-specific paths live in `paprika_backup.conf` (excluded from git via
+`.gitignore`). To set up on a new machine:
 
 ```bash
-# 1. Is Paprika installed and has it created its group container + DB?
-ls -la ~/Library/Group\ Containers/72KVKW69K8.com.hindsightlabs.paprika.mac.v3/Data/Database/
-# Expect: Paprika.sqlite, Paprika.sqlite-wal, Paprika.sqlite-shm
-
-# 2. sqlite3 present and can open the live DB (proves .backup will work)?
-sqlite3 ~/Library/Group\ Containers/72KVKW69K8.com.hindsightlabs.paprika.mac.v3/Data/Database/Paprika.sqlite ".tables"
+cp paprika_backup.conf.template paprika_backup.conf
+# edit paprika_backup.conf and fill in all five variables
 ```
 
-Confirm as well that **Paprika is actually installed and syncing on the Mac Mini** (otherwise the
-SQLite copy backs up stale/empty data). If the path differs on the Mini, capture the real path — it
-becomes the `PAPRIKA_DB_DIR` value in the conf. Only proceed to Step 1 once this is confirmed.
+Required variables:
 
-## Step 1 — files to create in `scripts/paprika-backup/`
+| Variable | Description |
+|----------|-------------|
+| `PAPRIKA_DB_DIR` | Directory holding `Paprika.sqlite` (see default path below) |
+| `BACKUP_DIR` | Absolute path where the zip is staged before moving to iCloud |
+| `ICLOUD_DIR` | iCloud folder the zip is moved to for cloud sync / long-term storage |
+| `PUSHOVER_USER_KEY` | Pushover user key (from pushover.net dashboard) |
+| `PUSHOVER_API_TOKEN` | Pushover API token (from your registered app) |
 
-Naming mirrors the mysql folder (snake_case script/conf, `com.jtarnvik.<name>.plist`).
+Default `PAPRIKA_DB_DIR` (verified on the Mac Mini, macOS convention — same on any Mac running the app):
 
-### 1. `paprika_backup.sh` (main script)
-Structure copied from `mysql_backup.sh`, same function layout and comment banners:
+```
+~/Library/Group Containers/72KVKW69K8.com.hindsightlabs.paprika.mac.v3/Data/Database
+```
 
-- `load_config()` — sources `paprika_backup.conf`, validates required vars
-  (`PAPRIKA_DB_DIR BACKUP_DIR ICLOUD_DIR PUSHOVER_USER_KEY PUSHOVER_API_TOKEN`). Copy the
-  missing-file / missing-var error handling verbatim from `mysql_backup.sh:14-40`.
-- `send_pushover()` — **identical** to `mysql_backup.sh:45-57` (title/message/priority → Pushover REST).
-- `backup_sqlite()` — new. `sqlite3 "$PAPRIKA_DB_DIR/Paprika.sqlite" ".backup '$WORK_DIR/Paprika.sqlite'"`,
-  capturing stderr; return sqlite3's exit code and any error text (same pattern as `dump_database`).
-  Guard first: if `$PAPRIKA_DB_DIR/Paprika.sqlite` is missing → error message (leads to failure
-  notification, so a mis-path or Paprika-not-installed situation is loud, like mysql's "no databases").
-- `create_zip()` — reuse `mysql_backup.sh:91-96` (`zip -j "$zip_file" "$WORK_DIR"/*`). Filename
-  `paprika_backup_YYYY-MM-DD.zip`.
-- `move_to_icloud()` — reuse `mysql_backup.sh:101-105` verbatim (mkdir -p iCloud dir, `mv` zip in).
-- `cleanup()` + `trap cleanup EXIT` — reuse (`rm -rf "$WORK_DIR"`).
-- `main()` — orchestrate: load_config → `WORK_DIR=$(mktemp -d)` → backup_sqlite → create_zip →
-  move_to_icloud, accumulating `errors` exactly like mysql's main, then send the ✅ / ⚠️ Pushover
-  (priority `-1` on success, `1` on error). Success message includes filename + `du -sh` size.
+---
 
-### 2. `paprika_backup.conf.template`
-Same shape as `mysql_backup.conf.template`, with a header comment. Empty-string placeholders for:
-`PAPRIKA_DB_DIR`, `BACKUP_DIR`, `ICLOUD_DIR`, `PUSHOVER_USER_KEY`, `PUSHOVER_API_TOKEN`, with a
-one-line comment on each. Include the known default path for `PAPRIKA_DB_DIR` as a comment.
-(Do **not** create the real `paprika_backup.conf` — it holds secrets and is gitignored; document
-the `cp template → conf` step in CLAUDE.md, matching siblings.)
+## Script structure
 
-### 3. `com.jtarnvik.paprikabackup.plist`
-Copy `com.jtarnvik.mysqlbackup.plist` and adapt:
-- `Label` → `com.jtarnvik.paprikabackup`
-- `ProgramArguments` script path → `/Users/jesper/scripts/paprika-backup/paprika_backup.sh`
-- `StandardOutPath` / `StandardErrorPath` → `…/paprika-backup/paprika_backup.log`
-- Schedule: **weekly, Sunday 03:00** (`Weekday 0, Hour 3`) — offset one hour after mysql's 02:00
-  so the two Mac-Mini jobs don't overlap. `RunAtLoad` false.
-- Update the header install/register/log comment block to the paprika paths.
+`paprika_backup.sh` is organised as functions:
 
-### 4. `.gitignore`
-Add `scripts/paprika-backup/.gitignore` (`*.conf` / `*.log`) to match `raid-watch/.gitignore` and
-keep the folder self-contained (even though the repo-level one already covers it).
+- `load_config()` — sources `paprika_backup.conf` and validates all variables are set
+- `send_pushover()` — sends a push notification via the Pushover REST API
+- `backup_sqlite()` — snapshots the live DB with `sqlite3 "$DB" ".backup ..."` into a single
+  checkpointed `Paprika.sqlite`; guards for a missing DB file and returns sqlite3's exit code
+- `create_zip()` — packages the snapshot into the dated zip
+- `move_to_icloud()` — creates the iCloud dir if needed and moves the zip into it
+- `cleanup()` — removes the temp working directory (registered via `trap EXIT`)
+- `main()` — orchestrates the full backup flow
 
-### CLAUDE.md handling — decision: rewrite during Step 1, not a separate step 3
-Once Step 1 is built, replace this planning-style doc with the sibling *usage* structure
-(What it does / Files / Configuration / Script structure / Scheduling / Testing / **Restoring** /
-Dependencies / Known behaviour). Document **only what Step 1 builds** (the SQLite backup), and add a
-short **"Planned — Step 2: HTML export"** section that preserves the motivating "why" (export survives
-Paprika-the-company shutting down; AppleScript chosen over paid Keyboard Maestro; Hammerspoon fallback).
-This keeps CLAUDE.md accurate at every commit rather than documenting unbuilt features. Step 2 then
-fills in the export sections. Preserve these "why" notes when rewriting: iCloud/CloudKit sync context,
-the removed `paprika-3-mcp` note, the two-backup rationale.
+A failed snapshot is fatal (loud ❌ notification and exit), because it means there is nothing to back
+up. Errors in the later zip/iCloud steps are accumulated and reported as a ⚠️ notification.
 
-Restoring section (Step 1): stop Paprika → replace `Paprika.sqlite` in the Database dir with the one
-from the zip and **delete** the stale `Paprika.sqlite-wal` / `Paprika.sqlite-shm` (the `.backup` file
-is already checkpointed) → relaunch.
+---
 
-### Git
-After creating each new file and once approved, `git add` it. Do **not** commit or push unless asked.
+## Scheduling (launchd)
 
-## Step 2 — HTML export (outline, build later)
-- `paprika_export.applescript` — drives File → Export in Paprika Recipe Manager 3 (System Events),
-  fills the save dialog (filename, folder = `$WORK_DIR`), format HTML, category "Alla recept", clicks Export.
-- Extend `paprika_backup.sh` `main()` to call the AppleScript (`osascript`) and fold the exported
-  output into the **same** dated zip alongside `Paprika.sqlite`, so one zip carries both backup types.
-- Add `EXPORT_DIR` / any export config to the conf template if needed; report export failures via the
-  same Pushover error path.
-- Fill in the "HTML export" sections of CLAUDE.md (script structure, dependencies: `osascript`,
-  Accessibility permission for System Events, known fragility notes).
-- Open questions to settle then: leave Paprika running after export (yes — needed for export);
-  retention (mirror mysql: one dated zip, overwrite same day, no auto-prune).
+The plist file registers a launchd agent for the current user (not system-wide).
 
-## Verification (Step 1)
-1. `cp paprika_backup.conf.template paprika_backup.conf` and fill in real values (contains Pushover secrets).
-2. `chmod +x paprika_backup.sh && ./paprika_backup.sh` — expect console progress lines, a
-   `paprika_backup_<date>.zip` in `ICLOUD_DIR`, and a ✅ Pushover notification.
-3. `unzip -l "$ICLOUD_DIR/paprika_backup_<date>.zip"` → confirms a single `Paprika.sqlite`.
-4. `sqlite3 <extracted>/Paprika.sqlite ".tables"` → confirms the snapshot is a valid, readable DB.
-5. Failure path: temporarily point `PAPRIKA_DB_DIR` at a bad path → expect a ⚠️ failure Pushover.
-6. launchd: `cp` plist to `~/Library/LaunchAgents/`, `launchctl load …`, `launchctl start
-   com.jtarnvik.paprikabackup`, then `tail -f paprika_backup.log` and re-check the iCloud zip.
+```bash
+# Install (copy plist and register — do once, survives reboot)
+cp ~/scripts/paprika-backup/com.jtarnvik.paprikabackup.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.jtarnvik.paprikabackup.plist
 
-## Context notes (preserved from original design doc)
+# Unregister
+launchctl unload ~/Library/LaunchAgents/com.jtarnvik.paprikabackup.plist
+
+# Trigger manually (e.g. for testing)
+launchctl start com.jtarnvik.paprikabackup
+
+# Check if registered
+launchctl list | grep jtarnvik
+
+# View logs
+tail -f ~/scripts/paprika-backup/paprika_backup.log
+```
+
+The schedule is **Sunday 03:00**, deliberately one hour after the mysql backup (02:00) so the two
+Mac-Mini jobs don't overlap. The plist has paths hardcoded for the Mac Mini (`~/scripts/paprika-backup/`).
+If deploying to a different machine, update the script path, log paths, and `EnvironmentVariables/PATH`
+to match. `sqlite3` and `zip` must be on the PATH — launchd does not inherit the user's shell PATH.
+
+### ⚠️ Full Disk Access is required for the launchd run
+
+Paprika's database lives in `~/Library/Group Containers/…`, which macOS protects under **Full Disk
+Access** (TCC). A manual run in Terminal works because it inherits Terminal's FDA grant, but the
+launchd run (`launchd → /bin/bash → sqlite3`) has no grant and fails with:
+
+```
+ERROR: could not snapshot Paprika database: Error: unable to open database
+"…/Paprika.sqlite": authorization denied
+```
+
+**Fix:** System Settings → Privacy & Security → **Full Disk Access** → `+` → add **`/bin/bash`**
+(the interpreter named in the plist's ProgramArguments) and enable it. The grant applies to the next
+process launch — no unload/load or reboot needed. This grant covers all bash scripts launched this
+way; acceptable on a private home server. Re-do this on any new machine the backup is deployed to.
+
+---
+
+## Testing the script manually
+
+```bash
+chmod +x paprika_backup.sh
+./paprika_backup.sh
+```
+
+A manual run inherits Terminal's Full Disk Access, so it works even before the launchd FDA grant
+above is in place. Output goes to stdout; the `paprika_backup.log` file is only written when the job
+runs via launchd. On success you should see a new `paprika_backup_<date>.zip` in `ICLOUD_DIR` and a
+✅ Pushover notification.
+
+---
+
+## Restoring from a backup
+
+The snapshot is a single, already-checkpointed `Paprika.sqlite` (the WAL is merged in at `.backup`
+time), so restoring does **not** involve `-wal`/`-shm` files.
+
+```bash
+# Unzip
+unzip paprika_backup_2026-07-10.zip -d ./restore
+
+# Inspect before restoring (optional)
+sqlite3 ./restore/Paprika.sqlite "PRAGMA integrity_check;"
+sqlite3 ./restore/Paprika.sqlite "SELECT COUNT(*) FROM ZRECIPE;"   # recipe count
+```
+
+To restore into the live app:
+1. **Quit Paprika** completely.
+2. Replace `Paprika.sqlite` in the Database dir with the one from the zip.
+3. **Delete** the now-stale `Paprika.sqlite-wal` and `Paprika.sqlite-shm` in that dir (the restored
+   file is already checkpointed; leaving old WAL/SHM would corrupt the view of the DB).
+4. Relaunch Paprika.
+
+The recipe name is stored in `ZRECIPE.ZNAME` (Paprika uses a Core Data `Z`-prefixed schema):
+
+```sql
+SELECT ZNAME FROM ZRECIPE ORDER BY ZNAME;   -- list all recipe names
+```
+
+---
+
+## Dependencies
+
+All dependencies are standard macOS tooling — no additional software or subscriptions required.
+
+| Tool | Used for |
+|------|----------|
+| `sqlite3` | Consistent snapshot of the live database (`.backup`) — ships with macOS |
+| `zip` | Packaging the backup |
+| `curl` | Pushover REST API calls |
+| `launchd` | macOS-native job scheduling |
+| Pushover | Push notifications to iPhone (one-time ~$5 app purchase, no subscription) |
+
+---
+
+## Known behaviour
+
+- `sqlite3 .backup` produces a consistent snapshot even while Paprika is open and syncing — there is
+  no need to quit the app for the backup, and no torn-copy risk from the live WAL.
+- Only one backup zip is kept per date. Running the script twice on the same day overwrites the first.
+- **Full Disk Access must be granted to `/bin/bash`** for the launchd run to read Paprika's Group
+  Container (see the Scheduling section). Manual Terminal runs are unaffected.
+- If the Mac is asleep at the scheduled time, launchd will not run the job; it runs at the next
+  scheduled time. Set `RunAtLoad` to `true` in the plist to catch up on next login if desired.
+- A missing or unreadable database is fatal and sends a ❌ notification — a mis-configured
+  `PAPRIKA_DB_DIR`, an uninstalled app, or a missing FDA grant all surface this way.
+
+---
+
+## Planned — Step 2: HTML export
+
+A second backup type, not yet implemented. Paprika's built-in **HTML export** produces a
+human-readable copy of all recipes that does not depend on the app or its sync servers — insurance
+against Paprika the company shutting down. The SQLite snapshot is complete and consistent, but only
+useful while Paprika (or a compatible reader) still exists; the HTML export is the durable, portable
+fallback.
+
+Planned approach:
+- `paprika_export.applescript` — drives File → Export in Paprika Recipe Manager 3 via System Events,
+  fills the save dialog (filename, folder = the script's temp work dir), format **HTML**, category
+  **"Alla recept"** (All recipes), clicks Export. AppleScript was chosen over the paid Keyboard Maestro;
+  **Hammerspoon** is the fallback if AppleScript proves too fragile.
+- Extend `paprika_backup.sh`'s `main()` to run the export (`osascript`) and fold its output into the
+  **same** dated zip alongside `Paprika.sqlite`, so one zip carries both backup types. Export failures
+  report via the same Pushover error path.
+- Add `osascript` and the System Events Accessibility permission to the Dependencies/Known behaviour
+  sections when built. Paprika is left running (the export needs it open).
+
+---
+
+## Context notes
+
 - Paprika syncs data via iCloud/CloudKit (`iCloud~com~hindsightlabs~paprika~ios~v3`); the SQLite files
   are the local copy of that cloud data.
 - The export dialog offers format HTML and category "Alla recept" (All recipes).
-- A Paprika MCP server (`paprika-3-mcp`, Homebrew) was previously tried and removed; only log files
-  remain and can be deleted if desired.
+- A Paprika MCP server (`paprika-3-mcp`, installed via Homebrew) was previously tried and removed; only
+  log files remain and can be deleted if desired.
