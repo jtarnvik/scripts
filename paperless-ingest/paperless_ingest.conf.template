@@ -8,7 +8,7 @@ PAPERLESS_URL="http://127.0.0.1:9400"
 # File holding the API token (My Profile → API Auth Token in the web UI), chmod 600
 PAPERLESS_TOKEN_FILE="$HOME/.config/paperless/token"
 
-# Watched by launchd (QueueDirectories) — must match the path in the plist
+# Where Hazel's copies arrive from the MacBook Pro
 INGEST_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/PrivateData/_paperless_uploads"
 
 # Where refused and failed documents are moved; must not be inside INGEST_DIR

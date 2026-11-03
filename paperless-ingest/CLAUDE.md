@@ -11,8 +11,7 @@ The backfill script (plan step 8) will live here too and reuse `paperless_names.
 
 - Hazel on the MacBook Pro copies each filed document to `iCloud Drive/PrivateData/_paperless_uploads`, which
   syncs to the Mini (Keep Downloaded is set on the folder there)
-- A launchd agent on the Mini runs the script whenever that folder is not empty (`QueueDirectories`), and every
-  5 minutes (`StartInterval`) to follow up on earlier uploads
+- A launchd agent on the Mini runs the script every 60 seconds (`StartInterval`)
 - Each document is uploaded through the API (`/api/documents/post_document/`) with a title and date taken from its
   filename, then kept in a pending folder until Paperless has consumed it
 - Consumed: the file is deleted. Refused or failed: it is moved to `iCloud Drive/PrivateData/_paperless_failed`
@@ -56,7 +55,7 @@ chmod 600 paperless_ingest.conf
 |----------|-------------|
 | `PAPERLESS_URL` | `http://127.0.0.1:9400`. `127.0.0.1` must be in `PAPERLESS_ALLOWED_HOSTS` |
 | `PAPERLESS_TOKEN_FILE` | File holding the API token, `~/.config/paperless/token` (`600`, folder `700`) |
-| `INGEST_DIR` | The watched folder. Must match `QueueDirectories` in the plist |
+| `INGEST_DIR` | Where Hazel's copies arrive, `iCloud Drive/PrivateData/_paperless_uploads` |
 | `FAILED_DIR` | Where refused and failed documents go. Must not be inside `INGEST_DIR` |
 | `STATE_DIR` | `~/.local/state/paperless-ingest`: pending uploads, `state.json`, a lock file |
 | `PUSHOVER_USER_KEY` | Pushover user key |
@@ -78,8 +77,7 @@ web UI, *My Profile* → *API Auth Token*, then on the MacBook
    - still `pending`/`started` — left for the next run; an alert if it is still waiting after 24 hours (the
      backfill can queue Paperless for hours)
 2. **Upload new files**, in name order:
-   - `.DS_Store` is deleted — it would otherwise keep the folder "not empty", and launchd would restart the job
-     every minute for ever
+   - `.DS_Store` (Finder's folder settings, if the folder is opened on the Mini) is deleted
    - a file iCloud has not finished downloading (the `SF_DATALESS` flag, or an old-style `.name.icloud`
      placeholder) is skipped; an alert if it is still not downloaded after 30 minutes
    - a subfolder or another hidden file is moved to `FAILED_DIR`, with an alert
@@ -87,8 +85,7 @@ web UI, *My Profile* → *API Auth Token*, then on the MacBook
      A file Paperless refuses outright (HTTP 4xx — for example `File type application/octet-stream not
      supported` for a `.zip`) goes to `FAILED_DIR`, with an alert
 3. **When Paperless does not answer** (connection refused, timeout, HTTP 5xx), the run stops and files stay where
-   they are. launchd starts the job again after `ThrottleInterval` (60 s) while the ingest folder is not empty.
-   An alert after 30 minutes. A refused token (HTTP 401/403) alerts at once.
+   they are, for the next run a minute later. An alert after 30 minutes. A refused token (HTTP 401/403) alerts at once.
 
 A name clash in `FAILED_DIR` gets a ` (2)`-style suffix. A lock file stops a run by hand from overlapping
 launchd's.
@@ -147,8 +144,15 @@ launchctl list | grep paperlessingest
 tail -f ~/scripts/paperless-ingest/paperless_ingest.log
 ```
 
-The plist has the paths of the Mini hardcoded (`~/scripts/paperless-ingest/`, and the ingest folder in
-`QueueDirectories`). `RunAtLoad` is on, so loading the job also processes anything already waiting.
+The plist has the paths of the Mini hardcoded (`~/scripts/paperless-ingest/`). `RunAtLoad` is on, so loading
+the job also processes anything already waiting.
+
+**Why a timer and not `QueueDirectories`:** launchd's folder trigger never fires for a folder in iCloud Drive —
+neither for a new file nor for a touched one (tested 2026-11-03), while the same job on a plain folder fired
+within a second. A run every 60 seconds is simpler and does not depend on how macOS reports changes inside
+iCloud Drive. An idle run (nothing waiting, nothing pending) lists the ingest and failed folders and exits: no
+API call, no log line, and no write — `state.json` is only written when it changes, and the lock file is
+opened without writing to it. Everything it reads is on the Mini's internal SSD.
 
 ---
 
@@ -170,4 +174,5 @@ seconds) to follow up. A port nobody listens on in `PAPERLESS_URL` gives the unr
   setting, Paperless 3 consumes the copy and only links the two (`duplicate_documents` on each).
 - The original filename in Paperless keeps Hazel's ` (1)`; only the title drops it.
 - A document with no date in its name or content gets the upload date.
-- Nothing is logged on a run with nothing to do, so the 5-minute timer does not fill the log.
+- Nothing is logged on a run with nothing to do, so the 60-second timer does not fill the log.
+- A new document is uploaded within a minute of iCloud syncing it to the Mini.

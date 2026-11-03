@@ -4,19 +4,20 @@ paperless_ingest.py
 Uploads the documents that arrive in the ingest folder (iCloud Drive, PrivateData/_paperless_uploads) to
 Paperless-ngx through its API — decisions 3, 11 and 15 of the Paperless plan in home-infra-manual.md.
 
-Started by paperless_ingest.sh, which loads paperless_ingest.conf into the environment. launchd runs it whenever
-the ingest folder is not empty (QueueDirectories), and every 5 minutes (StartInterval) to follow up on uploads.
+Started by paperless_ingest.sh, which loads paperless_ingest.conf into the environment. launchd runs it every
+60 seconds (StartInterval). Not QueueDirectories: launchd's folder trigger never fires for a folder in iCloud
+Drive (tested 2026-11-03). A run with nothing to do only lists two folders — no API call, no log line, no write.
 
 Each run:
   1. Follows up on earlier uploads. An accepted upload is kept in STATE_DIR/pending/<task id>/ until Paperless
      has consumed it: on success the file is deleted, on failure it is moved to the failed folder with an alert.
   2. Uploads every file in the ingest folder, with title and date from its name (paperless_names.py), and
-     moves it to pending/ — out of the watched folder, so that launchd stops restarting the job.
-     - .DS_Store is deleted; it would otherwise keep the folder "not empty" for ever.
+     moves it to pending/, out of the ingest folder.
+     - .DS_Store (Finder's folder settings, if the folder is opened on the Mini) is deleted.
      - A file iCloud has not finished downloading is left for a later run.
      - A subfolder or another hidden file is moved to the failed folder.
      - A file Paperless refuses (HTTP 4xx) is moved to the failed folder, with an alert.
-     - If Paperless cannot be reached, files stay where they are; launchd retries after ThrottleInterval.
+     - If Paperless cannot be reached, files stay where they are, for the next run.
 
 Pushover only when something needs attention: a failed file, Paperless unreachable for 30 minutes, a rejected
 token, a missing folder, a file still downloading after 30 minutes, an upload not consumed within 24 hours.
@@ -103,12 +104,20 @@ class State:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as file:
                 self.data = json.load(file)
+        self.saved = self._serialised()
 
     def save(self) -> None:
+        """Writes the state if it changed, so that an idle run every minute writes nothing."""
+        if self._serialised() == self.saved:
+            return
         temporary = self.path + ".tmp"
         with open(temporary, "w", encoding="utf-8") as file:
             json.dump(self.data, file, ensure_ascii=False, indent=2)
         os.replace(temporary, self.path)
+        self.saved = self._serialised()
+
+    def _serialised(self) -> str:
+        return json.dumps(self.data, ensure_ascii=False, sort_keys=True)
 
     def seconds_since(self, key: str) -> float:
         """Seconds since the condition `key` was first seen; starts the clock if it is new."""
@@ -420,7 +429,8 @@ def main() -> int:
     os.makedirs(settings.pending_dir, exist_ok=True)
 
     # launchd never runs two copies of the job, but a run by hand could overlap one
-    lock = open(os.path.join(settings.state_dir, "lock"), "w")
+    # "a", not "w": opening an existing file for appending does not write to it
+    lock = open(os.path.join(settings.state_dir, "lock"), "a")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
