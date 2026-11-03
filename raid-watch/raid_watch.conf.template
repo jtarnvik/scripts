@@ -5,3 +5,11 @@
 # Pushover credentials (from pushover.net)
 PUSHOVER_USER_KEY=""
 PUSHOVER_API_TOKEN=""
+
+# Name of this machine in notification titles, e.g. "Production" or "Media server"
+HOST_LABEL=""
+
+# RAID sets that must be present on this machine. A set that is missing from
+# diskutil's list (not assembled, disks unplugged) is reported as a problem.
+# Example: EXPECTED_RAID_SETS=("MediaStore" "MediaBack2")
+EXPECTED_RAID_SETS=()
