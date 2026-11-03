@@ -1,0 +1,22 @@
+# paperless_ingest.conf.template
+# Copy this file to paperless_ingest.conf and fill in the values.
+# paperless_ingest.conf is excluded from git via .gitignore — never commit it.
+
+# Paperless on this machine. 127.0.0.1 must be in PAPERLESS_ALLOWED_HOSTS in docker-compose.env.
+PAPERLESS_URL="http://127.0.0.1:9400"
+
+# File holding the API token (My Profile → API Auth Token in the web UI), chmod 600
+PAPERLESS_TOKEN_FILE="$HOME/.config/paperless/token"
+
+# Watched by launchd (QueueDirectories) — must match the path in the plist
+INGEST_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/PrivateData/_paperless_uploads"
+
+# Where refused and failed documents are moved; must not be inside INGEST_DIR
+FAILED_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/PrivateData/_paperless_failed"
+
+# Uploads waiting for Paperless to consume them, and which alerts have been sent
+STATE_DIR="$HOME/.local/state/paperless-ingest"
+
+# Pushover credentials (from pushover.net)
+PUSHOVER_USER_KEY=""
+PUSHOVER_API_TOKEN=""

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.jtarnvik.paperlessingest.plist
+  Place in: ~/Library/LaunchAgents/
+
+  Register:   launchctl load ~/Library/LaunchAgents/com.jtarnvik.paperlessingest.plist
+  Unregister: launchctl unload ~/Library/LaunchAgents/com.jtarnvik.paperlessingest.plist
+  Run now:    launchctl start com.jtarnvik.paperlessingest
+  Check log:  tail -f ~/scripts/paperless-ingest/paperless_ingest.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jtarnvik.paperlessingest</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- Update this path to wherever you cloned the repo -->
+        <string>/Users/jesper/scripts/paperless-ingest/paperless_ingest.sh</string>
+    </array>
+
+    <!-- Run whenever the ingest folder is not empty. Must match INGEST_DIR in paperless_ingest.conf -->
+    <key>QueueDirectories</key>
+    <array>
+        <string>/Users/jesper/Library/Mobile Documents/com~apple~CloudDocs/PrivateData/_paperless_uploads</string>
+    </array>
+
+    <!-- While files wait (Paperless down, iCloud still downloading), launchd restarts the job
+         no more often than this: a retry every minute -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!-- Also every 5 minutes, to follow up on uploads once the ingest folder is empty -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Log stdout and stderr to the same file -->
+    <key>StandardOutPath</key>
+    <string>/Users/jesper/scripts/paperless-ingest/paperless_ingest.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jesper/scripts/paperless-ingest/paperless_ingest.log</string>
+</dict>
+</plist>

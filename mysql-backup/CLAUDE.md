@@ -35,7 +35,7 @@ from git via `.gitignore`). To set up on a new machine:
 
 ```bash
 cp mysql_backup.conf.template mysql_backup.conf
-# edit mysql_backup.conf and fill in all six variables
+# edit mysql_backup.conf and fill in all seven variables
 ```
 
 Required variables:
@@ -45,7 +45,8 @@ Required variables:
 | `MYSQL_CONTAINER` | Docker container name or ID |
 | `MYSQL_USER` | MySQL user (typically `root`) |
 | `MYSQL_PASSWORD` | MySQL password |
-| `BACKUP_DIR` | Absolute path where zip files are saved |
+| `BACKUP_DIR` | Absolute path where the zip is staged before moving to iCloud |
+| `ICLOUD_DIR` | iCloud folder the zip is moved to for cloud sync / long-term storage |
 | `PUSHOVER_USER_KEY` | Pushover user key (from pushover.net dashboard) |
 | `PUSHOVER_API_TOKEN` | Pushover API token (from your registered app) |
 
