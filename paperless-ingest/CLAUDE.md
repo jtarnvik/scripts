@@ -29,6 +29,8 @@ Paperless never reads iCloud or a folder a host process writes to — see decisi
 | `paperless_ingest.py` | ✅ | The ingest logic |
 | `paperless_names.py` | ✅ | Title and date from a filename (decision 11), shared with the backfill |
 | `test_paperless_names.py` | ✅ | Unit tests for `paperless_names.py` |
+| `paperless_classification.py` | ✅ | Correspondents, document types, tags, and the rules that assign them |
+| `paperless_setup.py` | ✅ | Creates what `paperless_classification.py` defines in Paperless; only adds what is missing |
 | `paperless_ingest.conf.template` | ✅ | Template showing required config variables |
 | `paperless_ingest.conf` | ❌ | Local secrets — created from template, never committed |
 | `com.jtarnvik.paperlessingest.plist` | ✅ | macOS launchd agent |
@@ -102,6 +104,33 @@ that day.
 ```bash
 python3 -m unittest test_paperless_names
 ```
+
+---
+
+## Classification
+
+`paperless_classification.py` defines everything (plan step 7, 2026-11-04): 31 correspondents, 11 document types,
+10 tags plus `Backfill`, and three layers of rules, applied in order — a later layer overrides an earlier one's
+correspondent and document type, while tags add up:
+
+1. `FOLDER_RULES` — backfill only: archive folder names (regular expressions, whole name)
+2. `BACKFILL_NAME_RULES` — backfill only: historical filename patterns (regular expressions, searched,
+   case-insensitive), including the person tags, which need whole-word matching
+3. `WORKFLOWS` — Paperless workflows, for names that keep coming. Paperless applies them to every new document,
+   the backfill's uploads included, so they override what an upload sends (checked 2026-11-04: an upload sent
+   correspondent Nordea for `Apple - …`, the workflow made it Apple; the uploaded type and tag stayed)
+
+Workflow patterns are Paperless's filename filter: shell-style (`*`), whole filename, case-insensitive. Paperless
+runs workflows by their `order` (10, 20 … in the file's order), so correspondents come first, then broad types,
+then specific ones. Correspondents, types and tags use matching *Automatic*; `Backfill` uses none.
+
+```bash
+python3 paperless_setup.py --dry-run     # on the Mini: what would be created
+python3 paperless_setup.py               # create what is missing
+```
+
+The setup only creates, matched by name — it never changes or deletes. A changed workflow must be edited in the
+web UI (or deleted there, and the setup run again). A new Hazel rename rule needs a matching entry in `WORKFLOWS`.
 
 ---
 
