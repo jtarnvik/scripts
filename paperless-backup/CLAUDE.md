@@ -37,6 +37,7 @@ every copy at the next run.
 | `paperless_backup.conf.template` | ✅ | Config template — production values filled in, Pushover keys empty |
 | `paperless_backup.conf` | ❌ | Local config with the Pushover keys — never committed |
 | `com.jtarnvik.paperlessbackup.plist` | ✅ | launchd agent, Sunday 04:00 |
+| `restoretest-compose.yml` | ✅ | Throwaway Paperless for testing a zip (see Restore test) |
 
 ---
 
@@ -75,18 +76,41 @@ folder, since launchd starts jobs with a minimal `PATH`.
 
 ## Restoring
 
-Paperless's documented path is `document_importer` into an **empty** Paperless of the **same version**
-(3.4.1 at the time of writing):
+`document_importer` reads the zip directly, into an **empty** Paperless of the **same version** that exported
+it (3.4.1 at the time of writing). The export brings back everything — documents with their files, tags,
+correspondents, types, workflows, users and settings — so the empty instance needs no user of its own
+(leave `PAPERLESS_ADMIN_USER` unset).
+
+A full rebuild of production, in outline: stop the stack, remove the Postgres volume and the contents of
+`media/`, start the stack (migrations create an empty database), then
 
 ```bash
-# unzip, then point the importer at the folder (it reads manifest.json)
-unzip paperless-export-YYYY-MM-DD.zip -d ~/Backups/paperless/restore
-docker exec paperless-webserver document_importer /usr/src/paperless/export/restore
+docker exec paperless-webserver document_importer /usr/src/paperless/export/paperless-export-YYYY-MM-DD.zip
 ```
 
-The import refuses a database that already holds documents. For a full rebuild: stop the stack, remove the
-Postgres volume and `media/` contents, start the stack (migrations create an empty database), create no user,
-and import — the export brings the users back.
+with the zip first copied into `~/Backups/paperless` (the export folder the webserver sees).
+
+## Restore test
+
+`restoretest-compose.yml` starts a throwaway Paperless beside production (see the file's header). First run
+2026-11-04, on the first backup: import 32 s; documents, tags, correspondents, types, workflows, users and a
+fingerprint over every document's ID, title, date, correspondent, type and tags all equal to production;
+`document_sanity_checker` gave no errors or warnings on either (the same 14 infos, "no OCR data", on both).
+
+```bash
+mkdir ~/paperless-restoretest && cp ~/scripts/paperless-backup/restoretest-compose.yml ~/paperless-restoretest/
+cd ~/paperless-restoretest
+RESTORETEST_SECRET_KEY=$(openssl rand -hex 32) docker compose -f restoretest-compose.yml up -d
+docker inspect -f '{{.State.Health.Status}}' paperless-restoretest-webserver-1    # wait for "healthy", ~35 s
+docker exec paperless-restoretest-webserver-1 document_importer /backup/paperless-export-YYYY-MM-DD.zip
+docker exec paperless-restoretest-webserver-1 document_sanity_checker --no-progress-bar | grep -E 'ERROR|WARNING|Found'
+
+# compare with production: run in both containers
+docker exec <container> python3 /usr/src/paperless/src/manage.py shell -c \
+  "from documents.models import Document, Tag; print(Document.objects.count(), Tag.objects.count())"
+
+RESTORETEST_SECRET_KEY=x docker compose -f restoretest-compose.yml down -v && cd ~ && rm -r ~/paperless-restoretest
+```
 
 ---
 
@@ -94,4 +118,5 @@ and import — the export brings the users back.
 
 - If the Mini is asleep at 04:00 Sunday the run is skipped until the next week (the Mini never sleeps).
 - Running twice on the same day overwrites that day's zip in every place.
+- First run 2026-11-04 (2,528 documents): 3 min, a 2.8 GB zip of 5,973 files — PDFs barely compress.
 - The export holds documents in clear: the iCloud copy is as private as the iCloud account.

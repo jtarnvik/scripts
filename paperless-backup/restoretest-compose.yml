@@ -1,0 +1,37 @@
+# restoretest-compose.yml
+#
+# A throwaway Paperless for testing a backup zip (see CLAUDE.md → Restore test). Its own project name, its own
+# broker, a SQLite database and media in Docker volumes, no ports — it never touches the production stack.
+# The mirror folder is mounted read-only at /backup.
+#
+# Keep the image tags equal to production's docker-compose.yml: the importer needs the version that exported.
+#
+#   RESTORETEST_SECRET_KEY=$(openssl rand -hex 32) docker compose -f restoretest-compose.yml up -d
+#   RESTORETEST_SECRET_KEY=x docker compose -f restoretest-compose.yml down -v      # remove it all
+#
+# No OCR language is set: PAPERLESS_OCR_LANGUAGE=swe+eng would need PAPERLESS_OCR_LANGUAGES=swe to install the
+# Swedish pack at start (decision 7), and the import does no OCR.
+name: paperless-restoretest
+services:
+  broker:
+    image: valkey/valkey:9.1.3-alpine
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.4.1
+    depends_on: [broker]
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_TIME_ZONE: Europe/Stockholm
+      # Version 3 refuses to start without one; a fresh random key per test, stored nowhere
+      PAPERLESS_SECRET_KEY: ${RESTORETEST_SECRET_KEY:?set RESTORETEST_SECRET_KEY, see the top of this file}
+    volumes:
+      - data:/usr/src/paperless/data
+      - media:/usr/src/paperless/media
+      - type: bind
+        source: /Volumes/MediaOverflow/Backups/paperless
+        target: /backup
+        read_only: true
+        bind:
+          create_host_path: false
+volumes:
+  data:
+  media:
