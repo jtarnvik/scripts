@@ -3,7 +3,8 @@
 Uploads new documents to Paperless-ngx on the production Mac Mini (192.168.1.204). The design and its reasons are
 in the "Paperless-ngx Introduction Plan" of `home-infra-manual.md` — decisions 2, 3, 11 and 15.
 
-The backfill script (plan step 8) will live here too and reuse `paperless_names.py`.
+The backfill (`paperless_backfill.py`, plan steps 8–10) lives here too and shares `paperless_names.py`,
+`paperless_api.py` and `paperless_classification.py` with the ingest.
 
 ---
 
@@ -28,6 +29,8 @@ Paperless never reads iCloud or a folder a host process writes to — see decisi
 | `paperless_ingest.sh` | ✅ | launchd entry point: loads the conf, runs the Python script |
 | `paperless_ingest.py` | ✅ | The ingest logic |
 | `paperless_names.py` | ✅ | Title and date from a filename (decision 11), shared with the backfill |
+| `paperless_api.py` | ✅ | The Paperless API client (upload, tasks, lists), shared with the backfill |
+| `paperless_backfill.py` | ✅ | Imports the archive from the MacBook Pro (see Backfill below) |
 | `test_paperless_names.py` | ✅ | Unit tests for `paperless_names.py` |
 | `paperless_classification.py` | ✅ | Correspondents, document types, tags, and the rules that assign them |
 | `paperless_setup.py` | ✅ | Creates what `paperless_classification.py` defines in Paperless; only adds what is missing |
@@ -94,16 +97,47 @@ launchd's.
 
 ### Dates and titles (`paperless_names.py`)
 
-In order: a full date anywhere in the name (`2026-03-01`, `20260301`); a name ending ` - YYMM` with a valid
-month and 20YY at most one year from the reference year → the first of the month; a name ending ` - YYYY` →
-31 December; otherwise no date is sent and Paperless reads it from the content. The reference year is the current
-year here, the year folder in the backfill. The title is the filename without extension and without Hazel's
+In order: a full date anywhere in the name (`2026-03-01`, `20260301`); a six-digit date — ` - YYMMDD` as a part
+of its own (`Nordea - Betalning - 181108`) or `YY-MM-DD` (`FH 17-06-03`); a name ending ` - YYMM` → the first of
+the month; a name ending ` - YYYY` → 31 December; otherwise no date is sent and Paperless reads it from the
+content. A two-digit year must be at most one year from the **reference year**: the current year here; in the
+backfill the year folder, or a year at the start of the name for files in no year folder (`2017 - Bergvärme`).
+Without a reference year, a trailing ` - NNNN` that is a plausible year is read as one. The title is the filename without extension and without Hazel's
 trailing ` (1)`, normalised to NFC. `created` is sent as a plain date (`2026-11-01`), which Paperless stores as
 that day.
 
 ```bash
 python3 -m unittest test_paperless_names
 ```
+
+---
+
+## Backfill (`paperless_backfill.py`)
+
+Runs on the **MacBook Pro**, reading `iCloud Drive/PrivateData/Dokument Arkiv` directly and uploading to
+`http://192.168.1.204:9400`. Token: `~/.config/paperless/token` on the MacBook — **the same token as the Mini's**,
+copied over (Paperless has one token per user; regenerating it would break the ingest):
+`ssh jesper@192.168.1.204 'cat ~/.config/paperless/token' | (umask 077; mkdir -p ~/.config/paperless && cat > ~/.config/paperless/token)`.
+
+```bash
+python3 paperless_backfill.py --dry-run                 # report what would be uploaded; uploads nothing
+python3 paperless_backfill.py --path 2023 --path Kvitton  # only these files/folders (relative to the archive)
+python3 paperless_backfill.py                           # upload everything not uploaded yet
+python3 paperless_backfill.py --check                   # after Paperless has worked through its queue
+```
+
+- **Skipped:** the folder `_Paperless-ignored`, hidden files and folders, `psd`/`zip`/`pxm` files.
+- **Each upload** carries title and date (`paperless_names.py`, with the file's reference year), correspondent,
+  document type and tags from layers 1 and 2 of `paperless_classification.py`, and the tag `Backfill`.
+  Paperless's workflows (layer 3) then apply on top.
+- **State** in `~/.local/state/paperless-backfill/`: `done.tsv` records every upload (path, status
+  `uploaded`/`refused`, task ID, reference year), so a re-run skips what is done. Paperless unreachable or a
+  refused token stops the run; run it again to continue.
+- **Reports** (TSV, opens in Numbers) in the same folder: `dry-run-<time>.tsv` — every file with status, title,
+  date and the rule that set it, reference year, the final correspondent, type and tags (workflows simulated), and
+  the rules that fired; `check-<time>.tsv` — files refused at upload, failed tasks with Paperless's reason
+  (duplicates included), uploads not consumed yet, and the **review list**: documents dated more than a year
+  from their reference year.
 
 ---
 

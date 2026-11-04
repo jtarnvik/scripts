@@ -35,20 +35,17 @@ import sys
 import time
 import traceback
 import unicodedata
-import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from datetime import datetime
-from typing import Optional
 
+from paperless_api import AuthenticationFailed, Paperless, Refused, Unreachable, task_reason
 from paperless_names import parse_name
 
 UNREACHABLE_ALERT_SECONDS = 30 * 60
 INTERRUPTED_ALERT_SECONDS = 30 * 60
 DOWNLOADING_ALERT_SECONDS = 30 * 60
 PENDING_ALERT_SECONDS = 24 * 60 * 60
-HTTP_TIMEOUT_SECONDS = 120
 
 # st_flags bit for an iCloud file whose content is not on disk yet (<sys/stat.h>)
 SF_DATALESS = 0x40000000
@@ -57,18 +54,6 @@ REQUIRED_SETTINGS = (
     "PAPERLESS_URL", "PAPERLESS_TOKEN_FILE", "INGEST_DIR", "FAILED_DIR", "STATE_DIR",
     "PUSHOVER_USER_KEY", "PUSHOVER_API_TOKEN",
 )
-
-
-class Unreachable(Exception):
-    """Paperless did not answer, or answered with a server error. Try again later."""
-
-
-class AuthenticationFailed(Exception):
-    """Paperless refused the token (HTTP 401/403)."""
-
-
-class Refused(Exception):
-    """Paperless refused this particular file (HTTP 4xx). Trying again will not help."""
 
 
 def log(message: str) -> None:
@@ -175,75 +160,6 @@ class Notifier:
             self.state.mark_alerted(key)
 
 
-# ── Paperless API ─────────────────────────────────────────────────────────────
-
-class Paperless:
-
-    def __init__(self, settings: Settings) -> None:
-        self.base_url = settings.paperless_url
-        with open(settings.token_file, encoding="utf-8") as file:
-            self.token = file.read().strip()
-
-    def upload(self, path: str, upload_name: str, title: str, created: Optional[str]) -> str:
-        """Uploads one document. Returns the consumption task's ID."""
-        fields = [("title", title)]
-        if created is not None:
-            fields.append(("created", created))
-        with open(path, "rb") as file:
-            content = file.read()
-        boundary, body = _multipart(fields, "document", upload_name, content)
-        answer = self._request(
-            "/api/documents/post_document/",
-            data=body,
-            content_type=f"multipart/form-data; boundary={boundary}",
-        )
-        return json.loads(answer)
-
-    def task(self, task_id: str) -> Optional[dict]:
-        """The consumption task, or None if Paperless does not know it."""
-        answer = json.loads(self._request("/api/tasks/?" + urllib.parse.urlencode({"task_id": task_id})))
-        # A plain list in older API versions, a page with "results" in version 10
-        tasks = answer["results"] if isinstance(answer, dict) else answer
-        return tasks[0] if tasks else None
-
-    def _request(self, path: str, data: Optional[bytes] = None, content_type: Optional[str] = None) -> bytes:
-        request = urllib.request.Request(self.base_url + path, data=data)
-        request.add_header("Authorization", f"Token {self.token}")
-        request.add_header("Accept", "application/json")
-        if content_type is not None:
-            request.add_header("Content-Type", content_type)
-        try:
-            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-                return response.read()
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:500]
-            if error.code in (401, 403):
-                raise AuthenticationFailed(f"HTTP {error.code}: {detail}")
-            if error.code >= 500:
-                raise Unreachable(f"HTTP {error.code}: {detail}")
-            raise Refused(f"HTTP {error.code}: {detail}")
-        except (urllib.error.URLError, OSError) as error:
-            raise Unreachable(str(error))
-
-
-def _multipart(fields: list, file_field: str, file_name: str, content: bytes):
-    boundary = uuid.uuid4().hex
-    quoted_name = file_name.replace('"', "%22")
-    parts = []
-    for name, value in fields:
-        parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-        )
-    parts.append(
-        f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{quoted_name}"\r\n'
-        f"Content-Type: application/octet-stream\r\n\r\n".encode()
-        + content
-        + b"\r\n"
-    )
-    parts.append(f"--{boundary}--\r\n".encode())
-    return boundary, b"".join(parts)
-
-
 # ── Files ─────────────────────────────────────────────────────────────────────
 
 def is_downloading(path: str, name: str) -> bool:
@@ -289,7 +205,7 @@ def follow_up_pending(settings: Settings, state: State, notifier: Notifier, pape
             state.clear(key)
             log(f"Consumed: {name} -> document {task.get('related_document_ids')}")
         elif status in ("failure", "revoked"):
-            reason = _task_reason(task)
+            reason = task_reason(task)
             failed_name = move_to_failed(settings, path, name)
             os.rmdir(task_dir)
             state.clear(key)
@@ -306,22 +222,6 @@ def follow_up_pending(settings: Settings, state: State, notifier: Notifier, pape
                 f"{name} was uploaded more than 24 hours ago and its task is still '{status}'.",
                 0,
             )
-
-
-def _task_reason(task: dict) -> str:
-    """A readable reason from a failed task. API version 10 keeps it in result_data, as "duplicate_of" (with
-    PAPERLESS_CONSUMER_DELETE_DUPLICATES), "reason" or "error_message"."""
-    result = task.get("result_data")
-    if isinstance(result, dict):
-        if result.get("duplicate_of") is not None:
-            where = " (in the trash)" if result.get("duplicate_in_trash") else ""
-            return f"Duplicate of document #{result['duplicate_of']}{where}"
-        for field in ("reason", "error_message"):
-            if result.get(field):
-                return str(result[field])[:500]
-    if result:
-        return json.dumps(result, ensure_ascii=False)[:500]
-    return f"status {task.get('status')}"
 
 
 def upload_new_files(settings: Settings, state: State, notifier: Notifier, paperless: Paperless) -> None:
@@ -402,7 +302,7 @@ def run(settings: Settings, state: State, notifier: Notifier) -> None:
                 return
             state.clear(key)
 
-        paperless = Paperless(settings)
+        paperless = Paperless(settings.paperless_url, settings.token_file)
         follow_up_pending(settings, state, notifier, paperless)
         upload_new_files(settings, state, notifier, paperless)
     except InterruptedError as error:
