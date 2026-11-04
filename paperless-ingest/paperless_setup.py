@@ -15,7 +15,7 @@ existing workflow must be made in the web UI (or the workflow deleted there, and
     python3 paperless_setup.py --set-matching auto   # after it, then train the classifier
 
 --set-matching changes only the matching of the correspondents, document types and tags listed in
-paperless_classification.py (never Backfill), and creates nothing. Why: Paperless's automatic matching only fills
+paperless_classification.py (never Backfill or Inkorg), and creates nothing. Why: Paperless's automatic matching only fills
 empty fields, from a classifier it retrains every hour. Trained on a handful of documents it guesses badly — in the
 test batch (step 9) it gave four documents the rules had left empty the correspondent Ellevio and the type
 Faktura, the only labelled document at the time. So it is off while the archive is imported, and trained on the
@@ -23,8 +23,8 @@ whole of it afterwards.
 
 Defaults fit the production Mini; --url and --token-file change them.
 
-Correspondents, document types and tags (except Backfill) get matching "Automatic", so Paperless learns them from
-the documents. Each workflow triggers on "Consumption started" from the consume folder, API uploads and the web
+Correspondents, document types and tags (except Backfill and Inkorg) get matching "Automatic", so Paperless learns
+them from the documents. Inkorg is created as Paperless's inbox tag, which it gives every newly consumed document. Each workflow triggers on "Consumption started" from the consume folder, API uploads and the web
 UI, with one trigger per filename pattern (a workflow runs if any trigger matches).
 
 Python 3.9 (macOS's /usr/bin/python3), standard library only.
@@ -40,7 +40,7 @@ import urllib.request
 from typing import Dict, Optional
 
 from paperless_classification import (
-    BACKFILL_TAG, CORRESPONDENTS, DOCUMENT_TYPES, TAGS, WORKFLOWS, Workflow,
+    BACKFILL_TAG, CORRESPONDENTS, DOCUMENT_TYPES, INBOX_TAG, TAGS, WORKFLOWS, Workflow,
 )
 
 MATCHING_NONE = 0
@@ -96,8 +96,16 @@ def _path_and_query(url: str) -> str:
     return f"{parts.path}?{parts.query}"
 
 
-def ensure_named(api: Api, endpoint: str, names, dry_run: bool, matching: Dict[str, int]) -> Dict[str, int]:
-    """Creates the names that do not exist yet. Returns name -> id for all of them."""
+def ensure_named(
+    api: Api,
+    endpoint: str,
+    names,
+    dry_run: bool,
+    matching: Dict[str, int],
+    extra_fields: Optional[Dict[str, dict]] = None,
+) -> Dict[str, int]:
+    """Creates the names that do not exist yet. Returns name -> id for all of them. extra_fields adds fields to
+    the body of a name when it is created, e.g. {"Inkorg": {"is_inbox_tag": True}}."""
     existing = {item["name"]: item["id"] for item in api.get_all(endpoint)}
     for name in names:
         if name in existing:
@@ -108,7 +116,9 @@ def ensure_named(api: Api, endpoint: str, names, dry_run: bool, matching: Dict[s
             print(f"  would create {endpoint}: {name}")
             existing[name] = -1
             continue
-        created = api.create(endpoint, {"name": name, "matching_algorithm": algorithm, "is_insensitive": True})
+        body = {"name": name, "matching_algorithm": algorithm, "is_insensitive": True}
+        body.update((extra_fields or {}).get(name, {}))
+        created = api.create(endpoint, body)
         existing[name] = created["id"]
         print(f"  created  {endpoint}: {name} (id {created['id']})")
     return existing
@@ -168,7 +178,11 @@ def main() -> int:
     print("Document types")
     types = ensure_named(api, "document_types", DOCUMENT_TYPES, args.dry_run, {})
     print("Tags")
-    tags = ensure_named(api, "tags", TAGS + (BACKFILL_TAG,), args.dry_run, {BACKFILL_TAG: MATCHING_NONE})
+    tags = ensure_named(
+        api, "tags", TAGS + (BACKFILL_TAG, INBOX_TAG), args.dry_run,
+        matching={BACKFILL_TAG: MATCHING_NONE, INBOX_TAG: MATCHING_NONE},
+        extra_fields={INBOX_TAG: {"is_inbox_tag": True}},
+    )
 
     print("Workflows")
     existing = {item["name"] for item in api.get_all("workflows")}

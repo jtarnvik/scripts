@@ -63,6 +63,10 @@ TAGS = (
 # Marks everything the backfill imports. Never assigned automatically.
 BACKFILL_TAG = "Backfill"
 
+# Paperless's inbox tag: given to every newly consumed document; the owner reviews the document in the web UI,
+# corrects what is wrong (which trains the matching) and removes the tag. Never assigned automatically.
+INBOX_TAG = "Inkorg"
+
 
 # ── 1. Folders (backfill only) ────────────────────────────────────────────────
 # A file gets the rules of every folder in its path. Folders not listed — the year folders, "2019 och tidigare",

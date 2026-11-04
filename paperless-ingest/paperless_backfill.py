@@ -22,10 +22,11 @@ Skipped: the folder _Paperless-ignored, hidden files and folders, and types Pape
 
 Every upload is recorded in STATE_DIR/done.tsv, so a second run skips what the first one uploaded. --check reads
 it, asks Paperless how each upload went, and writes a report: failed and refused files, uploads not consumed yet,
-and documents whose date is more than a year from their reference year (the review list).
+and the review list: documents Paperless gave the day they were added — because neither name nor content held a
+date — and documents whose date is more than a year from their reference year.
 
-With --fix-dates, a document on the review list that Paperless gave the day it was added — because neither its
-name nor its content held a date — is set to 1 January of its reference year instead, and reported as "fixed".
+With --fix-dates, a document that got the day it was added is set to 1 January of its reference year instead, or
+to 1970-01-01 when it has no reference year (a placeholder that is easy to filter on), and reported as "fixed".
 The rest of the review list keeps the date Paperless read from the content, for a person to judge: an old paper
 can have been filed late.
 
@@ -68,6 +69,10 @@ DONE_COLUMNS = ["path", "status", "task_id", "uploaded_at", "reference_year", "d
 
 # Documents dated further than this from their reference year go on the review list
 REVIEW_YEARS = 1
+
+# --fix-dates gives this date to an undated document without a reference year: it sorts last, and a filter on
+# "created before 1971" finds the documents still to date by hand
+UNDATED = "1970-01-01"
 
 
 def nfc(text: str) -> str:
@@ -305,22 +310,33 @@ def upload(paperless: Paperless, files: List[ArchiveFile], done: Dict[str, dict]
 CHECK_COLUMNS = ["category", "path", "document", "date", "reference_year", "detail"]
 
 
-def review_row(paperless: Paperless, path: str, document: dict, reference_year: int, fix_dates: bool) -> dict:
-    """A document dated more than a year from its reference year: fixed, or left for review."""
-    row = {"category": "review", "path": path, "document": document["id"], "date": document["created"],
-           "reference_year": reference_year, "detail": "date more than a year from reference"}
-
-    # Paperless falls back to the day a document was added when neither its name nor its content holds a date.
-    # A date from the name is never the fallback: the name rules only accept dates near the reference year.
+def fell_back_to_added(path: str, document: dict, reference_year: Optional[int]) -> bool:
+    """Paperless falls back to the day a document was added when neither its name nor its content holds a date.
+    A date from the name is never the fallback: the name rules only accept dates near the reference year."""
     name_date = parse_name(os.path.basename(path), reference_year).created
-    fell_back = name_date is None and document["created"] == document["added"][:10]
-    if fell_back:
+    return name_date is None and document["created"] == document["added"][:10]
+
+
+def needs_review(path: str, document: dict, reference_year: Optional[int]) -> bool:
+    if fell_back_to_added(path, document, reference_year):
+        return True
+    return reference_year is not None and abs(int(document["created"][:4]) - reference_year) > REVIEW_YEARS
+
+
+def review_row(paperless: Paperless, path: str, document: dict, reference_year: Optional[int], fix_dates: bool) -> dict:
+    """A document with no date of its own, or dated more than a year from its reference year: fixed, or left for
+    review."""
+    row = {"category": "review", "path": path, "document": document["id"], "date": document["created"],
+           "reference_year": reference_year or "", "detail": "date more than a year from reference"}
+
+    if fell_back_to_added(path, document, reference_year):
         if fix_dates:
-            new_date = f"{reference_year}-01-01"
+            new_date = f"{reference_year}-01-01" if reference_year is not None else UNDATED
             paperless.update_document(document["id"], {"created": new_date})
             row.update(category="fixed", date=new_date, detail=f"no date found; was {document['created']}")
         else:
-            row["detail"] = "no date found, Paperless used the day it was added (--fix-dates sets 1 January)"
+            row["detail"] = ("no date found, Paperless used the day it was added "
+                             f"(--fix-dates sets 1 January of the reference year, or {UNDATED} without one)")
     return row
 
 
@@ -342,7 +358,7 @@ def check(paperless: Paperless, done: Dict[str, dict], report_path: str, fix_dat
             document_ids = task.get("related_document_ids") or []
             document = documents.get(document_ids[0]) if document_ids else None
             reference_year = int(entry["reference_year"]) if entry["reference_year"] else None
-            if document and reference_year and abs(int(document["created"][:4]) - reference_year) > REVIEW_YEARS:
+            if document and needs_review(path, document, reference_year):
                 row = review_row(paperless, path, document, reference_year, fix_dates)
                 counts[row["category"]] += 1
                 rows.append(row)
@@ -371,7 +387,8 @@ def main() -> int:
     mode.add_argument("--dry-run", action="store_true", help="write a report of what would be uploaded")
     mode.add_argument("--check", action="store_true", help="report how the uploads went")
     parser.add_argument("--fix-dates", action="store_true",
-                        help="with --check: date documents Paperless could not date as 1 January of the reference year")
+                        help="with --check: date documents Paperless could not date as 1 January of the reference "
+                             f"year, or {UNDATED} without one")
     parser.add_argument("--path", action="append", default=[],
                         help="only this file or folder, relative to the archive (repeatable)")
     parser.add_argument("--archive", default=DEFAULT_ARCHIVE)

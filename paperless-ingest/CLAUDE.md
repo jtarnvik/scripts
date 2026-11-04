@@ -137,12 +137,15 @@ python3 paperless_backfill.py --check --fix-dates       # … and date what Pape
 - **Reports** (TSV, opens in Numbers) in the same folder: `dry-run-<time>.tsv` — every file with status, title,
   date and the rule that set it, reference year, the final correspondent, type and tags (workflows simulated), and
   the rules that fired; `check-<time>.tsv` — files refused at upload, failed tasks with Paperless's reason
-  (duplicates included), uploads not consumed yet, and the **review list**: documents dated more than a year
-  from their reference year.
-- **`--fix-dates`:** a document on the review list whose name and content held no date gets the day it was added
-  from Paperless (found in the test batch: a photo, a `.txt`, a scanned booking). Recognised by `created` = the
-  date part of `added` with no date in the name, and set to **1 January of the reference year**. The rest of the
-  review list keeps the date Paperless read from the content — an old paper can be filed late — for a person.
+  (duplicates included), uploads not consumed yet, and the **review list**: documents Paperless could not date,
+  and documents dated more than a year from their reference year.
+- **`--fix-dates`:** a document whose name and content held no date gets the day it was added from Paperless
+  (found in the test batch: a photo, a `.txt`, a scanned booking). Recognised by `created` = the date part of
+  `added` with no date in the name — whatever the year distance, so it also catches files in the 2025/2026
+  folders and files with no reference year. Set to **1 January of the reference year**, or to the placeholder
+  **1970-01-01** without one (in the backfill: 79 documents, mostly `Betyg och anställningar`; filter on
+  "created before 1971" to date them by hand). The rest of the review list keeps the date Paperless read from the
+  content — an old paper can be filed late — for a person.
 - **Automatic matching is off during the backfill** (`paperless_setup.py --set-matching none`): it fills empty
   fields from a classifier retrained every hour, which on a few documents guesses badly — in the test batch it
   gave four documents the rules had left empty Ellevio/Faktura. Afterwards: `--set-matching auto`, train the
@@ -155,8 +158,8 @@ python3 paperless_backfill.py --check --fix-dates       # … and date what Pape
 ## Classification
 
 `paperless_classification.py` defines everything (plan step 7, 2026-11-04): 31 correspondents, 11 document types,
-10 tags plus `Backfill`, and three layers of rules, applied in order — a later layer overrides an earlier one's
-correspondent and document type, while tags add up:
+10 tags plus `Backfill` and the inbox tag `Inkorg`, and three layers of rules, applied in order — a later layer
+overrides an earlier one's correspondent and document type, while tags add up:
 
 1. `FOLDER_RULES` — backfill only: archive folder names (regular expressions, whole name)
 2. `BACKFILL_NAME_RULES` — backfill only: historical filename patterns (regular expressions, searched,
@@ -167,12 +170,14 @@ correspondent and document type, while tags add up:
 
 Workflow patterns are Paperless's filename filter: shell-style (`*`), whole filename, case-insensitive. Paperless
 runs workflows by their `order` (10, 20 … in the file's order), so correspondents come first, then broad types,
-then specific ones. Correspondents, types and tags use matching *Automatic*; `Backfill` uses none.
+then specific ones. Correspondents, types and tags use matching *Automatic*; `Backfill` and `Inkorg` use none.
+`Inkorg` is Paperless's inbox tag: every newly consumed document gets it; review the document in the web UI,
+correct what is wrong (which trains the matching) and remove the tag.
 
 ```bash
 python3 paperless_setup.py --dry-run     # on the Mini: what would be created
 python3 paperless_setup.py               # create what is missing
-python3 paperless_setup.py --set-matching none|auto   # switch matching of all of them (never Backfill)
+python3 paperless_setup.py --set-matching none|auto   # switch matching of all of them (never Backfill/Inkorg)
 ```
 
 The setup only creates, matched by name — it never changes or deletes. A changed workflow must be edited in the
