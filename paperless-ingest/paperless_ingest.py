@@ -45,6 +45,7 @@ from typing import Optional
 from paperless_names import parse_name
 
 UNREACHABLE_ALERT_SECONDS = 30 * 60
+INTERRUPTED_ALERT_SECONDS = 30 * 60
 DOWNLOADING_ALERT_SECONDS = 30 * 60
 PENDING_ALERT_SECONDS = 24 * 60 * 60
 HTTP_TIMEOUT_SECONDS = 120
@@ -384,19 +385,42 @@ def upload_new_files(settings: Settings, state: State, notifier: Notifier, paper
 # Main
 # =============================================================================
 
-def run(settings: Settings, state: State, notifier: Notifier) -> None:
-    for folder, key in ((settings.ingest_dir, "missing:ingest"), (settings.failed_dir, "missing:failed")):
-        if not os.path.isdir(folder):
-            notifier.send_once(key, "❌ Paperless ingest - folder missing", f"{folder} does not exist.", 1)
-            log(f"ERROR: folder missing: {folder}")
-            return
-        state.clear(key)
-
-    paperless = Paperless(settings)
+def folder_exists(path: str) -> bool:
+    """Like os.path.isdir, but an interrupted call raises instead of answering False."""
     try:
+        return stat.S_ISDIR(os.stat(path).st_mode)
+    except FileNotFoundError:
+        return False
+
+
+def run(settings: Settings, state: State, notifier: Notifier) -> None:
+    try:
+        for folder, key in ((settings.ingest_dir, "missing:ingest"), (settings.failed_dir, "missing:failed")):
+            if not folder_exists(folder):
+                notifier.send_once(key, "❌ Paperless ingest - folder missing", f"{folder} does not exist.", 1)
+                log(f"ERROR: folder missing: {folder}")
+                return
+            state.clear(key)
+
+        paperless = Paperless(settings)
         follow_up_pending(settings, state, notifier, paperless)
         upload_new_files(settings, state, notifier, paperless)
+    except InterruptedError as error:
+        # iCloud Drive's file system now and then answers a call with EINTR (seen 2026-11-03, listing the ingest
+        # folder), which Python does not retry there. Stopping is safe: each file is either still in the ingest
+        # folder or already in pending/, and the next run comes a minute later. Alert only if it persists.
+        log(f"Interrupted system call, will retry: {error}")
+        if state.seconds_since("interrupted") > INTERRUPTED_ALERT_SECONDS:
+            notifier.send_once(
+                "interrupted",
+                "❌ Paperless ingest - folder access interrupted",
+                f"File system calls have been interrupted for more than 30 minutes.\n{error}",
+                1,
+            )
+        return
     except Unreachable as error:
+        # The folders answered before Paperless was asked, so file system calls are not what failed
+        state.clear("interrupted")
         log(f"Paperless unreachable, will retry: {error}")
         if state.seconds_since("unreachable") > UNREACHABLE_ALERT_SECONDS:
             notifier.send_once(
@@ -408,8 +432,9 @@ def run(settings: Settings, state: State, notifier: Notifier) -> None:
             )
         return
     except AuthenticationFailed as error:
-        # Paperless answered, so it is reachable
+        # Paperless answered, so it is reachable; and the folders answered before it was asked
         state.clear("unreachable")
+        state.clear("interrupted")
         log(f"ERROR: Paperless refused the token: {error}")
         notifier.send_once(
             "authentication",
@@ -419,7 +444,7 @@ def run(settings: Settings, state: State, notifier: Notifier) -> None:
         )
         return
 
-    for key in ("unreachable", "authentication"):
+    for key in ("unreachable", "authentication", "interrupted"):
         if state.clear(key):
             log(f"Cleared: {key}")
 

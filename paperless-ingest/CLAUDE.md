@@ -120,6 +120,7 @@ they have cleared; `state.json` remembers which were sent.
 | `❌ Paperless ingest - Paperless unreachable` | No answer for 30 minutes | 1 |
 | `❌ Paperless ingest - token refused` | HTTP 401/403 | 1 |
 | `❌ Paperless ingest - folder missing` | `INGEST_DIR` or `FAILED_DIR` does not exist | 1 |
+| `❌ Paperless ingest - folder access interrupted` | File system calls interrupted (`EINTR`) for 30 minutes | 1 |
 | `❌ Paperless ingest - script error` | Any unexpected exception | 1 |
 
 Every alert is also written to the log as `Alert: …`; a failed send as `ERROR: Pushover notification failed: …`.
@@ -175,4 +176,12 @@ seconds) to follow up. A port nobody listens on in `PAPERLESS_URL` gives the unr
 - The original filename in Paperless keeps Hazel's ` (1)`; only the title drops it.
 - A document with no date in its name or content gets the upload date.
 - Nothing is logged on a run with nothing to do, so the 60-second timer does not fill the log.
-- A new document is uploaded within a minute of iCloud syncing it to the Mini.
+- A new document is uploaded within a minute of iCloud syncing it to the Mini, and the file is deleted a minute
+  later, once the follow-up sees it consumed (step 6 of the plan, 2026-11-04: about 1.5 minutes from `Införda` to
+  Paperless).
+- **iCloud Drive now and then interrupts a file system call** (`InterruptedError`, `EINTR` — seen once,
+  2026-11-03 21:07, listing the ingest folder), which Python does not retry there. The run stops and logs
+  `Interrupted system call, will retry`; the next run a minute later carries on. Stopping is safe: each file is
+  either still in the ingest folder or already in `pending/`. An alert only if it goes on for 30 minutes. The
+  folder check uses `os.stat`, not `os.path.isdir`, which would answer an interrupted call with False and so
+  report the folder missing.
