@@ -92,12 +92,27 @@ class Paperless:
             path = _path_and_query(next_url) if next_url else None
         return results
 
+    def update_document(self, document_id: int, fields: dict) -> None:
+        """Changes fields of one document, e.g. {"created": "2013-01-01"}."""
+        self._request(
+            f"/api/documents/{document_id}/",
+            data=json.dumps(fields).encode(),
+            content_type="application/json",
+            method="PATCH",
+        )
+
     def ids_by_name(self, endpoint: str) -> Dict[str, int]:
         """name -> id for "correspondents", "document_types" or "tags"."""
         return {item["name"]: item["id"] for item in self.get_all(endpoint)}
 
-    def _request(self, path: str, data: Optional[bytes] = None, content_type: Optional[str] = None) -> bytes:
-        request = urllib.request.Request(self.base_url + path, data=data)
+    def _request(
+        self,
+        path: str,
+        data: Optional[bytes] = None,
+        content_type: Optional[str] = None,
+        method: Optional[str] = None,
+    ) -> bytes:
+        request = urllib.request.Request(self.base_url + path, data=data, method=method)
         request.add_header("Authorization", f"Token {self.token}")
         request.add_header("Accept", "application/json")
         if content_type is not None:

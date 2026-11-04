@@ -11,6 +11,16 @@ existing workflow must be made in the web UI (or the workflow deleted there, and
     python3 paperless_setup.py --dry-run     # show what would be created
     python3 paperless_setup.py               # create it
 
+    python3 paperless_setup.py --set-matching none   # before the backfill: no automatic guesses
+    python3 paperless_setup.py --set-matching auto   # after it, then train the classifier
+
+--set-matching changes only the matching of the correspondents, document types and tags listed in
+paperless_classification.py (never Backfill), and creates nothing. Why: Paperless's automatic matching only fills
+empty fields, from a classifier it retrains every hour. Trained on a handful of documents it guesses badly — in the
+test batch (step 9) it gave four documents the rules had left empty the correspondent Ellevio and the type
+Faktura, the only labelled document at the time. So it is off while the archive is imported, and trained on the
+whole of it afterwards.
+
 Defaults fit the production Mini; --url and --token-file change them.
 
 Correspondents, document types and tags (except Backfill) get matching "Automatic", so Paperless learns them from
@@ -63,9 +73,12 @@ class Api:
     def create(self, endpoint: str, body: dict) -> dict:
         return self._request(f"/api/{endpoint}/", body)
 
-    def _request(self, path: str, body: Optional[dict] = None) -> dict:
+    def patch(self, endpoint: str, item_id: int, body: dict) -> dict:
+        return self._request(f"/api/{endpoint}/{item_id}/", body, method="PATCH")
+
+    def _request(self, path: str, body: Optional[dict] = None, method: Optional[str] = None) -> dict:
         data = json.dumps(body).encode() if body is not None else None
-        request = urllib.request.Request(self.url + path, data=data)
+        request = urllib.request.Request(self.url + path, data=data, method=method)
         request.add_header("Authorization", f"Token {self.token}")
         request.add_header("Accept", "application/json")
         if data is not None:
@@ -119,14 +132,36 @@ def workflow_body(workflow: Workflow, order: int, correspondents: dict, types: d
     return {"name": workflow.name, "order": order, "enabled": True, "triggers": triggers, "actions": [action]}
 
 
+def set_matching(api: Api, algorithm: int, dry_run: bool) -> None:
+    """Sets the matching of every correspondent, document type and tag in paperless_classification.py."""
+    for endpoint, names in (("correspondents", CORRESPONDENTS), ("document_types", DOCUMENT_TYPES), ("tags", TAGS)):
+        changed = 0
+        for item in api.get_all(endpoint):
+            if item["name"] not in names or item["matching_algorithm"] == algorithm:
+                continue
+            if not dry_run:
+                api.patch(endpoint, item["id"], {"matching_algorithm": algorithm})
+            changed += 1
+        verb = "would change" if dry_run else "changed"
+        print(f"  {endpoint}: {verb} {changed} of {len(names)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
     parser.add_argument("--url", default="http://127.0.0.1:9400")
     parser.add_argument("--token-file", default="~/.config/paperless/token")
-    parser.add_argument("--dry-run", action="store_true", help="show what would be created, create nothing")
+    parser.add_argument("--dry-run", action="store_true", help="show what would be done, change nothing")
+    parser.add_argument("--set-matching", choices=("none", "auto"),
+                        help="only switch matching of the correspondents, types and tags to none or automatic")
     args = parser.parse_args()
 
     api = Api(args.url, args.token_file)
+
+    if args.set_matching:
+        algorithm = MATCHING_NONE if args.set_matching == "none" else MATCHING_AUTOMATIC
+        print(f"Matching -> {args.set_matching}")
+        set_matching(api, algorithm, args.dry_run)
+        return 0
 
     print("Correspondents")
     correspondents = ensure_named(api, "correspondents", CORRESPONDENTS, args.dry_run, {})

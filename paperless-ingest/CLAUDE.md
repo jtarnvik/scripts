@@ -124,6 +124,7 @@ python3 paperless_backfill.py --dry-run                 # report what would be u
 python3 paperless_backfill.py --path 2023 --path Kvitton  # only these files/folders (relative to the archive)
 python3 paperless_backfill.py                           # upload everything not uploaded yet
 python3 paperless_backfill.py --check                   # after Paperless has worked through its queue
+python3 paperless_backfill.py --check --fix-dates       # … and date what Paperless could not date
 ```
 
 - **Skipped:** the folder `_Paperless-ignored`, hidden files and folders, `psd`/`zip`/`pxm` files.
@@ -138,6 +139,16 @@ python3 paperless_backfill.py --check                   # after Paperless has wo
   the rules that fired; `check-<time>.tsv` — files refused at upload, failed tasks with Paperless's reason
   (duplicates included), uploads not consumed yet, and the **review list**: documents dated more than a year
   from their reference year.
+- **`--fix-dates`:** a document on the review list whose name and content held no date gets the day it was added
+  from Paperless (found in the test batch: a photo, a `.txt`, a scanned booking). Recognised by `created` = the
+  date part of `added` with no date in the name, and set to **1 January of the reference year**. The rest of the
+  review list keeps the date Paperless read from the content — an old paper can be filed late — for a person.
+- **Automatic matching is off during the backfill** (`paperless_setup.py --set-matching none`): it fills empty
+  fields from a classifier retrained every hour, which on a few documents guesses badly — in the test batch it
+  gave four documents the rules had left empty Ellevio/Faktura. Afterwards: `--set-matching auto`, train the
+  classifier, and review `document_retagger --suggest` before applying anything.
+- **Wait for the queue** with `--check` (it reports `not finished (pending|started)`); each `--check` writes a
+  report.
 
 ---
 
@@ -161,6 +172,7 @@ then specific ones. Correspondents, types and tags use matching *Automatic*; `Ba
 ```bash
 python3 paperless_setup.py --dry-run     # on the Mini: what would be created
 python3 paperless_setup.py               # create what is missing
+python3 paperless_setup.py --set-matching none|auto   # switch matching of all of them (never Backfill)
 ```
 
 The setup only creates, matched by name — it never changes or deletes. A changed workflow must be edited in the

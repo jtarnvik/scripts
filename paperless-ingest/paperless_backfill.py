@@ -9,6 +9,7 @@ downloaded, and uploads over the LAN. Nothing in the archive is changed, copied 
     python3 paperless_backfill.py --path 2023 --path Kvitton  # upload part of the archive (the test batch)
     python3 paperless_backfill.py                           # upload everything not uploaded yet
     python3 paperless_backfill.py --check                   # once Paperless has worked through its queue
+    python3 paperless_backfill.py --check --fix-dates       # … and date the documents Paperless could not date
 
 Each file is uploaded with:
   - title and date from its name (paperless_names.py), with the file's reference year: its year folder, or a year
@@ -22,6 +23,11 @@ Skipped: the folder _Paperless-ignored, hidden files and folders, and types Pape
 Every upload is recorded in STATE_DIR/done.tsv, so a second run skips what the first one uploaded. --check reads
 it, asks Paperless how each upload went, and writes a report: failed and refused files, uploads not consumed yet,
 and documents whose date is more than a year from their reference year (the review list).
+
+With --fix-dates, a document on the review list that Paperless gave the day it was added — because neither its
+name nor its content held a date — is set to 1 January of its reference year instead, and reported as "fixed".
+The rest of the review list keeps the date Paperless read from the content, for a person to judge: an old paper
+can have been filed late.
 
 Python 3.9 (macOS's /usr/bin/python3), standard library only.
 """
@@ -299,12 +305,28 @@ def upload(paperless: Paperless, files: List[ArchiveFile], done: Dict[str, dict]
 CHECK_COLUMNS = ["category", "path", "document", "date", "reference_year", "detail"]
 
 
-def check(paperless: Paperless, done: Dict[str, dict], report_path: str) -> int:
+def review_row(paperless: Paperless, path: str, document: dict, reference_year: int, fix_dates: bool) -> dict:
+    """A document dated more than a year from its reference year: fixed, or left for review."""
+    row = {"category": "review", "path": path, "document": document["id"], "date": document["created"],
+           "reference_year": reference_year, "detail": "date more than a year from reference"}
+
+    # Paperless falls back to the day a document was added when neither its name nor its content holds a date.
+    # A date from the name is never the fallback: the name rules only accept dates near the reference year.
+    name_date = parse_name(os.path.basename(path), reference_year).created
+    fell_back = name_date is None and document["created"] == document["added"][:10]
+    if fell_back:
+        if fix_dates:
+            new_date = f"{reference_year}-01-01"
+            paperless.update_document(document["id"], {"created": new_date})
+            row.update(category="fixed", date=new_date, detail=f"no date found; was {document['created']}")
+        else:
+            row["detail"] = "no date found, Paperless used the day it was added (--fix-dates sets 1 January)"
+    return row
+
+
+def check(paperless: Paperless, done: Dict[str, dict], report_path: str, fix_dates: bool) -> int:
     tasks = {t["task_id"]: t for t in paperless.get_all("tasks", {"task_type": "consume_file"})}
-    created_by_id = {
-        d["id"]: d["created"]
-        for d in paperless.get_all("documents", {"fields": "id,created"})
-    }
+    documents = {d["id"]: d for d in paperless.get_all("documents", {"fields": "id,created,added"})}
 
     rows = []
     counts: Counter = Counter()
@@ -318,13 +340,12 @@ def check(paperless: Paperless, done: Dict[str, dict], report_path: str) -> int:
         if status == "success":
             counts["consumed"] += 1
             document_ids = task.get("related_document_ids") or []
-            document_id = document_ids[0] if document_ids else None
-            created = created_by_id.get(document_id)
+            document = documents.get(document_ids[0]) if document_ids else None
             reference_year = int(entry["reference_year"]) if entry["reference_year"] else None
-            if created and reference_year and abs(int(created[:4]) - reference_year) > REVIEW_YEARS:
-                counts["review"] += 1
-                rows.append({"category": "review", "path": path, "document": document_id, "date": created,
-                             "reference_year": reference_year, "detail": "date more than a year from reference"})
+            if document and reference_year and abs(int(document["created"][:4]) - reference_year) > REVIEW_YEARS:
+                row = review_row(paperless, path, document, reference_year, fix_dates)
+                counts[row["category"]] += 1
+                rows.append(row)
         elif status in ("failure", "revoked"):
             counts["failed"] += 1
             rows.append({"category": "failed", "path": path, "detail": task_reason(task)})
@@ -349,6 +370,8 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="write a report of what would be uploaded")
     mode.add_argument("--check", action="store_true", help="report how the uploads went")
+    parser.add_argument("--fix-dates", action="store_true",
+                        help="with --check: date documents Paperless could not date as 1 January of the reference year")
     parser.add_argument("--path", action="append", default=[],
                         help="only this file or folder, relative to the archive (repeatable)")
     parser.add_argument("--archive", default=DEFAULT_ARCHIVE)
@@ -367,7 +390,7 @@ def main() -> int:
 
     if args.check:
         paperless = Paperless(args.url, args.token_file)
-        return check(paperless, done, os.path.join(state_dir, f"check-{stamp}.tsv"))
+        return check(paperless, done, os.path.join(state_dir, f"check-{stamp}.tsv"), args.fix_dates)
 
     if not os.path.isdir(archive):
         print(f"ERROR: archive not found: {archive}")
