@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.jtarnvik.paperlessbackup.plist
+  Place in: ~/Library/LaunchAgents/
+
+  Register:   launchctl load ~/Library/LaunchAgents/com.jtarnvik.paperlessbackup.plist
+  Unregister: launchctl unload ~/Library/LaunchAgents/com.jtarnvik.paperlessbackup.plist
+  Run now:    launchctl start com.jtarnvik.paperlessbackup
+  Check log:  tail -f ~/scripts/paperless-backup/paperless_backup.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jtarnvik.paperlessbackup</string>
+
+    <!-- launchd starts jobs with a minimal PATH. docker lives in /usr/local/bin (a link into Docker.app) and
+         needs Docker's own bin folder for its credential helper. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/jesper/scripts/paperless-backup/paperless_backup.sh</string>
+    </array>
+
+    <!-- Every Sunday at 04:00, after the MySQL backup (02:00) and Paprika (03:00) -->
+    <!-- Weekday: 0=Sunday, 1=Monday ... 6=Saturday -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jesper/scripts/paperless-backup/paperless_backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jesper/scripts/paperless-backup/paperless_backup.log</string>
+</dict>
+</plist>

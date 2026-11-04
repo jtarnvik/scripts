@@ -1,0 +1,26 @@
+# paperless_backup.conf.template
+# Copy this file to paperless_backup.conf and fill in the values.
+# paperless_backup.conf is excluded from git via .gitignore — never commit it.
+# The values below fit the production Mac Mini; only the Pushover keys are empty.
+
+# The Paperless webserver container (fixed name in docker-compose.yml)
+WEBSERVER_CONTAINER="paperless-webserver"
+
+# The export folder inside the container, and the host folder bind-mounted there (the staging folder,
+# on the internal disk)
+CONTAINER_EXPORT_DIR="/usr/src/paperless/export"
+STAGING_DIR="/Users/jesper/Backups/paperless"
+
+# The folder on the MediaOverflow mirror, and how many zips to keep there
+MIRROR_DIR="/Volumes/MediaOverflow/Backups/paperless"
+KEEP_ON_MIRROR="4"
+
+# Small pinned image for the copy to the mirror (already pulled on the Mini)
+HELPER_IMAGE="alpine:3.24.3"
+
+# iCloud folder that keeps the latest zip
+ICLOUD_DIR="/Users/jesper/Library/Mobile Documents/com~apple~CloudDocs/PrivateData/Backups/Paperless"
+
+# Pushover credentials (from pushover.net) — the same as in paperless_ingest.conf
+PUSHOVER_USER_KEY=""
+PUSHOVER_API_TOKEN=""
