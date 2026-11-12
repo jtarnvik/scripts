@@ -11,6 +11,7 @@ Each script lives in its own folder and is self-contained — setup instructions
 | `mysql-backup` | Weekly automated backup of a MySQL database running in Docker. Zips the backup and syncs it to iCloud. Sends a push notification on success or failure. |
 | `paperless-ingest` | Uploads documents arriving in an iCloud Drive folder to Paperless-ngx through its API, with title and date from the filename. Moves refused or failed documents aside and sends a push notification. |
 | `paperless-backup` | Weekly export of Paperless-ngx to a dated zip: the last 4 kept on the MediaOverflow mirror, the latest in iCloud. Sends a push notification on success or failure. |
+| `glam-backup`  | Weekly rsync mirror of a folder on the Media SSD to the MediaOverflow RAID, deletions included; deleted and changed files are kept 4 weeks. Sends a push notification on success or failure. |
 | `raid-watch`   | Daily check and weekly heartbeat for macOS Apple RAID sets. Sends a Pushover alert if a degraded or failed RAID is detected; weekly summary is always sent. |
 
 ## General setup

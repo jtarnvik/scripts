@@ -1,0 +1,29 @@
+# glam_backup.conf.template
+# Copy this file to glam_backup.conf and fill in the values.
+# glam_backup.conf is excluded from git via .gitignore — never commit it.
+# The values below fit the production Mac Mini; only the Pushover keys are empty.
+
+# Homebrew's rsync 3.x — not /usr/bin/rsync, which is Apple's openrsync
+RSYNC="/opt/homebrew/bin/rsync"
+
+# The folder to back up, and the volume it lives on (checked to be mounted before each run)
+SOURCE_DIR="/Volumes/Media/glam"
+SOURCE_VOLUME="/Volumes/Media"
+
+# The mirror of SOURCE_DIR on the MediaOverflow RAID, and the volume it lives on
+TARGET_DIR="/Volumes/MediaOverflow/Backups/glam"
+TARGET_VOLUME="/Volumes/MediaOverflow"
+
+# Files deleted from or changed in SOURCE_DIR are moved here, into one dated folder per run, instead of
+# being removed from the mirror. Dated folders older than KEEP_DELETED_DAYS are pruned.
+# 28 days with a weekly run keeps the 4 newest folders.
+DELETED_DIR="/Volumes/MediaOverflow/Backups/glam-deleted"
+KEEP_DELETED_DAYS="28"
+
+# A run that would delete more files than this stops before deleting anything more and sends a ❌ —
+# protection against a mass delete in SOURCE_DIR. Raise it for one run if the deletes are intended.
+MAX_DELETE="500"
+
+# Pushover credentials (from pushover.net) — the same as in the other scripts' conf files
+PUSHOVER_USER_KEY=""
+PUSHOVER_API_TOKEN=""
