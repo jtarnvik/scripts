@@ -42,6 +42,7 @@ Every changed item (`--itemize-changes`) and rsync's stats go to the log.
 
 ```bash
 brew install rsync           # /usr/bin/rsync is Apple's openrsync — not used
+brew pin rsync               # see Permissions below
 
 cd ~/scripts/glam-backup
 cp glam_backup.conf.template glam_backup.conf
@@ -57,9 +58,20 @@ launchctl list | grep glambackup
 tail -f ~/scripts/glam-backup/glam_backup.log
 ```
 
+### Permissions
+
 The script reads and writes the external volumes itself (unlike the Paperless backup, which goes through
-Docker), so the launchd run needs file access to removable volumes. `/bin/bash` has Full Disk Access on the
-Mini (granted for the Paprika backup), which covers it.
+Docker), so the launchd run needs file access to removable volumes:
+
+- `/bin/bash` has Full Disk Access on the Mini (granted for the Paprika backup). That covers the script and the
+  Apple tools it runs — `perl` renames on `/Volumes/Media` without a prompt.
+- **Homebrew's `rsync` needs its own grant.** The first launchd run (2026-11-12) showed a dialog on the Mini's
+  screen asking whether `rsync` may access files on a removable volume; Allow was clicked. The grant is under
+  System Settings → Privacy & Security → Files and Folders → `rsync` → Removable Volumes.
+- The grant is tied to the versioned path `/opt/homebrew/Cellar/rsync/<version>/bin/rsync`, so **rsync is pinned**
+  (`brew pin rsync`): an upgrade would make the next unattended Sunday run meet a dialog nobody clicks.
+  To upgrade: `brew unpin rsync && brew upgrade rsync && brew pin rsync`, then **at the Mini's screen** (or
+  Screen Sharing) `launchctl start com.jtarnvik.glambackup` and click **Allow**.
 
 ---
 
@@ -71,7 +83,7 @@ Mini (granted for the Paprika backup), which covers it.
 | A volume is not mounted, `glam` cannot be read, rsync missing | loud ❌ |
 | Renaming to NFD failed | loud ❌ — nothing was mirrored |
 | More than `MAX_DELETE` (500) deletes | loud ❌ — rsync deleted (moved aside) 500 and stopped deleting; the rest of the mirror is updated |
-| Any other rsync error | loud ❌ with the first error lines |
+| Any other rsync error — e.g. "Operation not permitted" when rsync has lost its Removable Volumes grant | loud ❌ with the first error lines |
 | Pruning `glam-deleted` failed | loud ❌ — the mirror itself is done |
 
 Files that vanish while rsync runs (exit code 24, e.g. a download moved mid-run) are logged, not an error.
