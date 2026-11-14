@@ -1,7 +1,8 @@
 # Paperless Ingest — Project Context
 
 Uploads new documents to Paperless-ngx on the production Mac Mini (192.168.1.204). The design and its reasons are
-in the "Paperless-ngx Introduction Plan" of `home-infra-manual.md` — decisions 2, 3, 11 and 15.
+in the Paperless plan, `paperless-plan.md` in this folder — decisions 2, 3, 11 and 15. How to run Paperless itself is
+in `home-infra-manual.md` (personal repo).
 
 The backfill (`paperless_backfill.py`, plan steps 8–10) lives here too and shares `paperless_names.py`,
 `paperless_api.py` and `paperless_classification.py` with the ingest.
@@ -18,7 +19,7 @@ The backfill (`paperless_backfill.py`, plan steps 8–10) lives here too and sha
 - Consumed: the file is deleted. Refused or failed: it is moved to `iCloud Drive/PrivateData/_paperless_failed`
   with a Pushover alert
 
-Paperless never reads iCloud or a folder a host process writes to — see decision 3 in the manual.
+Paperless never reads iCloud or a folder a host process writes to — see decision 3 in `paperless-plan.md`.
 
 ---
 
@@ -26,6 +27,7 @@ Paperless never reads iCloud or a folder a host process writes to — see decisi
 
 | File | Committed | Purpose |
 |------|-----------|---------|
+| `paperless-plan.md` | ✅ | The finished introduction plan: why Paperless is built this way (decisions 1–15, steps 1–12) |
 | `paperless_ingest.sh` | ✅ | launchd entry point: loads the conf, runs the Python script |
 | `paperless_ingest.py` | ✅ | The ingest logic |
 | `paperless_names.py` | ✅ | Title and date from a filename (decision 11), shared with the backfill |

@@ -3,7 +3,7 @@
 # paperless_backup.sh
 #
 # Weekly backup of Paperless-ngx on the production Mac Mini — decision 14 of the
-# Paperless plan in home-infra-manual.md:
+# Paperless plan in paperless-ingest/paperless-plan.md:
 #
 #   1. document_exporter (inside the webserver container) writes a dated zip,
 #      paperless-export-YYYY-MM-DD.zip, into the staging folder on the internal

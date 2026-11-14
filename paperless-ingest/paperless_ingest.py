@@ -2,7 +2,7 @@
 paperless_ingest.py
 
 Uploads the documents that arrive in the ingest folder (iCloud Drive, PrivateData/_paperless_uploads) to
-Paperless-ngx through its API — decisions 3, 11 and 15 of the Paperless plan in home-infra-manual.md.
+Paperless-ngx through its API — decisions 3, 11 and 15 of the Paperless plan in paperless-plan.md.
 
 Started by paperless_ingest.sh, which loads paperless_ingest.conf into the environment. launchd runs it every
 60 seconds (StartInterval). Not QueueDirectories: launchd's folder trigger never fires for a folder in iCloud

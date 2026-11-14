@@ -2,7 +2,7 @@
 paperless_setup.py
 
 Creates the classification in paperless_classification.py in Paperless: correspondents, document types, tags
-and workflows — step 7 of the Paperless plan in home-infra-manual.md.
+and workflows — step 7 of the Paperless plan in paperless-plan.md.
 
 Only creates what is missing, matched by name; it never changes or deletes anything. So it is safe to run again,
 for example after adding a correspondent or a workflow to paperless_classification.py — but a change to an

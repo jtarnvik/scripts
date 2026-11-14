@@ -1,7 +1,7 @@
 """
 paperless_classification.py
 
-How documents are classified in Paperless — step 7 of the Paperless plan in home-infra-manual.md (decisions 12
+How documents are classified in Paperless — step 7 of the Paperless plan in paperless-plan.md (decisions 12
 and 13, settled 2026-11-04). Read by paperless_setup.py, which creates all of this in Paperless, and by the
 backfill (step 8).
 

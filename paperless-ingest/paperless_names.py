@@ -1,7 +1,7 @@
 """
 paperless_names.py
 
-Title and document date from an archive filename — decision 11 of the Paperless plan in home-infra-manual.md,
+Title and document date from an archive filename — decision 11 of the Paperless plan in paperless-plan.md,
 extended in step 8. Shared by the daily ingest (paperless_ingest.py) and the backfill (paperless_backfill.py).
 
 Rules, in order:

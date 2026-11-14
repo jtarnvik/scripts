@@ -2,7 +2,7 @@
 paperless_backfill.py
 
 Imports the document archive (iCloud Drive, PrivateData/Dokument Arkiv) into Paperless-ngx — decision 13 and
-steps 8–10 of the Paperless plan in home-infra-manual.md. Runs on the MacBook Pro, which has the whole archive
+steps 8–10 of the Paperless plan in paperless-plan.md. Runs on the MacBook Pro, which has the whole archive
 downloaded, and uploads over the LAN. Nothing in the archive is changed, copied or moved.
 
     python3 paperless_backfill.py --dry-run                 # report what would be uploaded, upload nothing

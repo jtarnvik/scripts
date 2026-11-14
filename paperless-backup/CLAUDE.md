@@ -1,7 +1,7 @@
 # Paperless Backup — Project Context
 
 Weekly backup of Paperless-ngx running in Docker on the production Mac Mini — decision 14 and step 11 of the
-Paperless plan in `home-infra-manual.md` (personal repo). Paperless's database lives in a Docker volume and its
+Paperless plan in `../paperless-ingest/paperless-plan.md`. Paperless's database lives in a Docker volume and its
 documents in `media/` on the Media SSD; this export is the only backup of Paperless's own work (titles, dates,
 tags, correspondents, workflows, users).
 
